@@ -5,7 +5,14 @@ let _definitions: ProviderDefinition[] | null = null;
 
 	async function loadDefinitions(): Promise<ProviderDefinition[]> {
 		if (_definitions) return _definitions;
-		_definitions = [];
+		const [
+			claude,
+		] = await Promise.all([
+			import("./claude/index.ts"),
+		]);
+		_definitions = [
+			claude.definition,
+		];
 		return _definitions;
 	}
 
