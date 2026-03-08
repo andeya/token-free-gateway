@@ -7,11 +7,14 @@ let _definitions: ProviderDefinition[] | null = null;
 		if (_definitions) return _definitions;
 		const [
 			claude,
+			chatgpt,
 		] = await Promise.all([
 			import("./claude/index.ts"),
+			import("./chatgpt/index.ts"),
 		]);
 		_definitions = [
 			claude.definition,
+			chatgpt.definition,
 		];
 		return _definitions;
 	}
