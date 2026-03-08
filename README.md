@@ -2,15 +2,12 @@
 
 > Multi-provider OpenAI-compatible AI gateway powered by web sessions
 
-## Overview
+## Supported Providers
 
-Proxies AI provider web interfaces as an OpenAI-compatible API with no API keys required.
-Uses browser sessions captured via Chrome DevTools Protocol (CDP).
-
-## Requirements
-
-- [Bun](https://bun.sh/) runtime
-- Google Chrome
+| Provider | Model ID Prefix |
+|----------|-----------------|
+| Claude (Anthropic) | `claude-web/` |
+| ChatGPT (OpenAI) | `chatgpt-web/` |
 
 ## Quick Start
 
