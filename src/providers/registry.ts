@@ -9,15 +9,18 @@ let _definitions: ProviderDefinition[] | null = null;
 			claude,
 			chatgpt,
 			deepseek,
+			doubao,
 		] = await Promise.all([
 			import("./claude/index.ts"),
 			import("./chatgpt/index.ts"),
 			import("./deepseek/index.ts"),
+			import("./doubao/index.ts"),
 		]);
 		_definitions = [
 			claude.definition,
 			chatgpt.definition,
 			deepseek.definition,
+			doubao.definition,
 		];
 		return _definitions;
 	}
