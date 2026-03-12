@@ -5,7 +5,10 @@ import { GeminiWebClient } from "./client.ts";
 export const definition: ProviderDefinition = {
 	id: "gemini-web",
 	name: "Gemini Web",
-	models: [],
+	models: [
+		{ id: "gemini-pro", name: "Gemini Pro (Web)" },
+		{ id: "gemini-ultra", name: "Gemini Ultra (Web)" },
+	],
 	factory: (credentials) => new GeminiWebClient(credentials as any),
 	loginFn: loginGeminiWeb,
 };
