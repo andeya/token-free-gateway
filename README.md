@@ -2,12 +2,17 @@
 
 > Multi-provider OpenAI-compatible AI gateway powered by web sessions
 
-## Supported Providers
+## Supported Providers (7 so far)
 
 | Provider | Model ID Prefix |
 |----------|-----------------|
-| Claude (Anthropic) | `claude-web/` |
-| ChatGPT (OpenAI) | `chatgpt-web/` |
+| Claude | `claude-web/` |
+| ChatGPT | `chatgpt-web/` |
+| DeepSeek | `deepseek-web/` |
+| Doubao | `doubao-web/` |
+| Gemini | `gemini-web/` |
+| GLM | `glm-web/` |
+| GLM Intl | `glm-intl-web/` |
 
 ## Quick Start
 
