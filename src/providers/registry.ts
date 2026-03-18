@@ -14,6 +14,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			glm,
 			glmIntl,
 			grok,
+			kimi,
 		] = await Promise.all([
 			import("./claude/index.ts"),
 			import("./chatgpt/index.ts"),
@@ -23,6 +24,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			import("./glm/index.ts"),
 			import("./glm-intl/index.ts"),
 			import("./grok/index.ts"),
+			import("./kimi/index.ts"),
 		]);
 		_definitions = [
 			claude.definition,
@@ -33,6 +35,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			glm.definition,
 			glmIntl.definition,
 			grok.definition,
+			kimi.definition,
 		];
 		return _definitions;
 	}
