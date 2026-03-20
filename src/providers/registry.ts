@@ -16,6 +16,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			grok,
 			kimi,
 			perplexity,
+			qwen,
 		] = await Promise.all([
 			import("./claude/index.ts"),
 			import("./chatgpt/index.ts"),
@@ -27,6 +28,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			import("./grok/index.ts"),
 			import("./kimi/index.ts"),
 			import("./perplexity/index.ts"),
+			import("./qwen/index.ts"),
 		]);
 		_definitions = [
 			claude.definition,
@@ -39,6 +41,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			grok.definition,
 			kimi.definition,
 			perplexity.definition,
+			qwen.definition,
 		];
 		return _definitions;
 	}
