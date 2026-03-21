@@ -18,6 +18,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			perplexity,
 			qwen,
 			qwenCn,
+			xiaomimo,
 		] = await Promise.all([
 			import("./claude/index.ts"),
 			import("./chatgpt/index.ts"),
@@ -31,6 +32,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			import("./perplexity/index.ts"),
 			import("./qwen/index.ts"),
 			import("./qwen-cn/index.ts"),
+			import("./xiaomimo/index.ts"),
 		]);
 		_definitions = [
 			claude.definition,
@@ -45,6 +47,7 @@ let _definitions: ProviderDefinition[] | null = null;
 			perplexity.definition,
 			qwen.definition,
 			qwenCn.definition,
+			xiaomimo.definition,
 		];
 		return _definitions;
 	}
