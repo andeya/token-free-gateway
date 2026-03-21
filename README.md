@@ -2,7 +2,7 @@
 
 > Multi-provider OpenAI-compatible AI gateway powered by web sessions
 
-## Supported Providers (7 so far)
+## Supported Providers (13 total)
 
 | Provider | Model ID Prefix |
 |----------|-----------------|
@@ -13,15 +13,33 @@
 | Gemini | `gemini-web/` |
 | GLM | `glm-web/` |
 | GLM Intl | `glm-intl-web/` |
+| Grok | `grok-web/` |
+| Kimi | `kimi-web/` |
+| Perplexity | `perplexity-web/` |
+| Qwen | `qwen-web/` |
+| Qwen CN | `qwen-cn-web/` |
+| Xiaomimo | `xiaomimo-web/` |
 
 ## Quick Start
 
 ```bash
 bun install
-./start-chrome-debug.sh
-bun run webauth
-bun run start
+token-free-gateway chrome
+token-free-gateway webauth
+token-free-gateway start
 ```
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `serve` | Start in foreground (default) |
+| `start` | Start in background |
+| `stop` | Stop background server |
+| `restart` | Restart |
+| `status` | Show status |
+| `webauth` | Authorize providers |
+| `chrome [start\|stop]` | Manage Chrome debug |
 
 ## Configuration
 
