@@ -62,3 +62,15 @@ token-free-gateway start
 claude-sonnet-4-20250514              # direct model ID
 claude-web/claude-sonnet-4-20250514   # provider-id/model-id
 ```
+
+## Troubleshooting
+
+**Chrome not connecting**: Run `token-free-gateway chrome start`.
+**Auth expired**: Run `token-free-gateway webauth`.
+**Port in use**: Set `PORT=3457 token-free-gateway start`.
+
+## Architecture
+
+```
+Client → Gateway → Chrome (CDP) → AI Provider Website
+```
