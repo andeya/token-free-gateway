@@ -48,3 +48,17 @@ token-free-gateway start
 | `PORT` | `3456` | Server port |
 | `GATEWAY_API_KEY` | — | Optional API key |
 | `CDP_URL` | `http://127.0.0.1:9222` | Chrome debug URL |
+
+## API Compatibility
+
+- `POST /v1/chat/completions` — streaming and non-streaming
+- `GET /v1/models` — list all authorized models
+- `GET /v1/models/:id` — get model info
+- `GET /health` — health check
+
+## Model Format
+
+```
+claude-sonnet-4-20250514              # direct model ID
+claude-web/claude-sonnet-4-20250514   # provider-id/model-id
+```
