@@ -85,3 +85,8 @@ Client → Gateway → Chrome (CDP) → AI Provider Website
 
 `GATEWAY_API_KEY` enables Bearer token auth.
 Credentials stored in `~/.config/token-free-gateway/`.
+
+## Advanced
+
+Run with custom port: `PORT=3457 token-free-gateway start`
+Build binary: `bun run build`
