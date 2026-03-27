@@ -80,3 +80,8 @@ Client → Gateway → Chrome (CDP) → AI Provider Website
 - First request: 2-5s (browser init)
 - Subsequent: fast (session reused)
 - Streaming latency: ~1ms/chunk
+
+## Security
+
+`GATEWAY_API_KEY` enables Bearer token auth.
+Credentials stored in `~/.config/token-free-gateway/`.
