@@ -74,3 +74,9 @@ claude-web/claude-sonnet-4-20250514   # provider-id/model-id
 ```
 Client → Gateway → Chrome (CDP) → AI Provider Website
 ```
+
+## Performance
+
+- First request: 2-5s (browser init)
+- Subsequent: fast (session reused)
+- Streaming latency: ~1ms/chunk
