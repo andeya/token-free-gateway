@@ -90,3 +90,7 @@ Credentials stored in `~/.config/token-free-gateway/`.
 
 Run with custom port: `PORT=3457 token-free-gateway start`
 Build binary: `bun run build`
+
+## FAQ
+
+**Q: Works with OpenAI SDKs?** A: Yes, set `base_url=http://localhost:3456/v1`.
