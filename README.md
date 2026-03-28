@@ -106,3 +106,9 @@ Handles Proof-of-Work challenge automatically via embedded WASM.
 ## Gemini Notes
 
 Uses Playwright for page interaction (no direct API endpoint).
+
+## Known Limitations
+
+- Requires local Chrome
+- Sessions expire (re-run webauth)
+- Not for high-volume production
