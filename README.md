@@ -94,3 +94,7 @@ Build binary: `bun run build`
 ## FAQ
 
 **Q: Works with OpenAI SDKs?** A: Yes, set `base_url=http://localhost:3456/v1`.
+
+## ChatGPT Notes
+
+Falls back to DOM simulation on 403. Slower but more reliable.
