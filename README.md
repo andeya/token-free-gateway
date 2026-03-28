@@ -98,3 +98,7 @@ Build binary: `bun run build`
 ## ChatGPT Notes
 
 Falls back to DOM simulation on 403. Slower but more reliable.
+
+## DeepSeek Notes
+
+Handles Proof-of-Work challenge automatically via embedded WASM.
