@@ -112,3 +112,11 @@ Uses Playwright for page interaction (no direct API endpoint).
 - Requires local Chrome
 - Sessions expire (re-run webauth)
 - Not for high-volume production
+
+## Release Notes
+
+### v0.5.0 (upcoming)
+- 13 providers
+- Streaming support
+- Background daemon
+- Tool calling
