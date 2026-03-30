@@ -132,3 +132,7 @@ Requests can be cancelled by closing the client connection.
 ## Perplexity Notes
 
 Citation markers are stripped from responses.
+
+## Grok Notes
+
+Uses grok.x.com API. Re-authorize if site changes.
