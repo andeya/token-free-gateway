@@ -124,3 +124,7 @@ Uses Playwright for page interaction (no direct API endpoint).
 ## Multi-Provider
 
 Run multiple instances on different ports for load balancing.
+
+## Cancellation
+
+Requests can be cancelled by closing the client connection.
