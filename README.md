@@ -120,3 +120,7 @@ Uses Playwright for page interaction (no direct API endpoint).
 - Streaming support
 - Background daemon
 - Tool calling
+
+## Multi-Provider
+
+Run multiple instances on different ports for load balancing.
