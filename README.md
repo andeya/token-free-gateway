@@ -128,3 +128,7 @@ Run multiple instances on different ports for load balancing.
 ## Cancellation
 
 Requests can be cancelled by closing the client connection.
+
+## Perplexity Notes
+
+Citation markers are stripped from responses.
