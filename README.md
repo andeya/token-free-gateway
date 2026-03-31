@@ -144,3 +144,7 @@ Uses refresh tokens for session management.
 ## Qwen Notes
 
 Supports both domestic and international Qwen endpoints.
+
+## GLM Notes
+
+GLM and GLM-intl are separate providers with separate auth.
