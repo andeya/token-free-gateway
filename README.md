@@ -136,3 +136,7 @@ Citation markers are stripped from responses.
 ## Grok Notes
 
 Uses grok.x.com API. Re-authorize if site changes.
+
+## Kimi Notes
+
+Uses refresh tokens for session management.
