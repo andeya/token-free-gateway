@@ -148,3 +148,7 @@ Supports both domestic and international Qwen endpoints.
 ## GLM Notes
 
 GLM and GLM-intl are separate providers with separate auth.
+
+## Docker
+
+Docker image not yet provided. Use binary or Bun directly.
