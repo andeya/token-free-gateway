@@ -140,3 +140,7 @@ Uses grok.x.com API. Re-authorize if site changes.
 ## Kimi Notes
 
 Uses refresh tokens for session management.
+
+## Qwen Notes
+
+Supports both domestic and international Qwen endpoints.
