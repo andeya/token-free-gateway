@@ -186,3 +186,8 @@ curl http://localhost:3456/health
 | Claude | Cookie | SSE | Fastest |
 | ChatGPT | Session | SSE/DOM | DOM fallback |
 | DeepSeek | Cookie+PoW | SSE | WASM solver |
+
+## Version History
+
+- v0.5.0: 13 providers, streaming, daemon mode
+- v0.1.0: Initial release with Claude only
