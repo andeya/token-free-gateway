@@ -152,3 +152,7 @@ GLM and GLM-intl are separate providers with separate auth.
 ## Docker
 
 Docker image not yet provided. Use binary or Bun directly.
+
+## Provider Integration
+
+All providers use CDP-based session capture except Gemini (Playwright).
