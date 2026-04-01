@@ -191,3 +191,7 @@ curl http://localhost:3456/health
 
 - v0.5.0: 13 providers, streaming, daemon mode
 - v0.1.0: Initial release with Claude only
+
+---
+
+*See [CHANGELOG](CHANGELOG.md) for full release history.*
