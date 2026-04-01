@@ -167,3 +167,14 @@ PRs welcome. Run `bun run check` before submitting.
 from openai import OpenAI
 client = OpenAI(base_url="http://localhost:3456/v1", api_key="none")
 ```
+
+## API Examples
+
+```bash
+# Chat
+curl http://localhost:3456/v1/chat/completions -d '{...}'
+# Models
+curl http://localhost:3456/v1/models
+# Health
+curl http://localhost:3456/health
+```
