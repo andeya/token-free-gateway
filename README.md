@@ -160,3 +160,10 @@ All providers use CDP-based session capture except Gemini (Playwright).
 ## Contributing
 
 PRs welcome. Run `bun run check` before submitting.
+
+## OpenAI SDK Integration
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://localhost:3456/v1", api_key="none")
+```
