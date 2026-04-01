@@ -178,3 +178,11 @@ curl http://localhost:3456/v1/models
 # Health
 curl http://localhost:3456/health
 ```
+
+## Provider Comparison
+
+| Provider | Auth Method | Streaming | Notes |
+|----------|------------|-----------|-------|
+| Claude | Cookie | SSE | Fastest |
+| ChatGPT | Session | SSE/DOM | DOM fallback |
+| DeepSeek | Cookie+PoW | SSE | WASM solver |
