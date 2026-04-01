@@ -156,3 +156,7 @@ Docker image not yet provided. Use binary or Bun directly.
 ## Provider Integration
 
 All providers use CDP-based session capture except Gemini (Playwright).
+
+## Contributing
+
+PRs welcome. Run `bun run check` before submitting.
