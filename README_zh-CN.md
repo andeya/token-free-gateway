@@ -2,7 +2,14 @@
 
 > 基于网页会话的多提供商 OpenAI 兼容 AI 网关
 
-本网关通过浏览器会话代理 AI 提供商网页接口，无需 API Token。
+## 支持的提供商
+
+| 提供商 | 模型 ID 前缀 |
+|--------|-------------|
+| Claude (Anthropic) | `claude-web/` |
+| ChatGPT (OpenAI) | `chatgpt-web/` |
+| DeepSeek | `deepseek-web/` |
+| 豆包 (字节跳动) | `doubao-web/` |
 
 ## 快速开始
 
