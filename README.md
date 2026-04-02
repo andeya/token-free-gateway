@@ -1,197 +1,236 @@
 # Token-Free Gateway
 
-> Multi-provider OpenAI-compatible AI gateway powered by web sessions
+**[中文文档](README_zh-CN.md)**
 
-## Supported Providers (13 total)
+Use ChatGPT, Claude, Gemini, DeepSeek, and 9 more AI models — **completely free, no API keys required**. Just log in via browser.
 
-| Provider | Model ID Prefix |
-|----------|-----------------|
-| Claude | `claude-web/` |
-| ChatGPT | `chatgpt-web/` |
-| DeepSeek | `deepseek-web/` |
-| Doubao | `doubao-web/` |
-| Gemini | `gemini-web/` |
-| GLM | `glm-web/` |
-| GLM Intl | `glm-intl-web/` |
-| Grok | `grok-web/` |
-| Kimi | `kimi-web/` |
-| Perplexity | `perplexity-web/` |
-| Qwen | `qwen-web/` |
-| Qwen CN | `qwen-cn-web/` |
-| Xiaomimo | `xiaomimo-web/` |
+Token-Free Gateway is a lightweight OpenAI-compatible API server that turns web-based AI sessions into a standard `/v1/chat/completions` endpoint with full **Tools / Function Calling** support. Point any OpenAI SDK client at it and it just works.
 
-## Quick Start
+## Why Token-Free Gateway?
 
-```bash
-bun install
-token-free-gateway chrome
-token-free-gateway webauth
-token-free-gateway start
-```
+| Traditional API usage | Token-Free Gateway         |
+| --------------------- | -------------------------- |
+| Purchase API tokens   | **Completely free**        |
+| Pay per request       | No quota, no billing       |
+| Credit card required  | Browser login only         |
+| API key may leak      | Credentials stored locally |
 
-## CLI Commands
+## What You Get
 
-| Command | Description |
-|---------|-------------|
-| `serve` | Start in foreground (default) |
-| `start` | Start in background |
-| `stop` | Stop background server |
-| `restart` | Restart |
-| `status` | Show status |
-| `webauth` | Authorize providers |
-| `chrome [start\|stop]` | Manage Chrome debug |
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3456` | Server port |
-| `GATEWAY_API_KEY` | — | Optional API key |
-| `CDP_URL` | `http://127.0.0.1:9222` | Chrome debug URL |
-
-## API Compatibility
-
-- `POST /v1/chat/completions` — streaming and non-streaming
-- `GET /v1/models` — list all authorized models
-- `GET /v1/models/:id` — get model info
-- `GET /health` — health check
-
-## Model Format
-
-```
-claude-sonnet-4-20250514              # direct model ID
-claude-web/claude-sonnet-4-20250514   # provider-id/model-id
-```
-
-## Troubleshooting
-
-**Chrome not connecting**: Run `token-free-gateway chrome start`.
-**Auth expired**: Run `token-free-gateway webauth`.
-**Port in use**: Set `PORT=3457 token-free-gateway start`.
-
-## Architecture
-
-```
-Client → Gateway → Chrome (CDP) → AI Provider Website
-```
-
-## Performance
-
-- First request: 2-5s (browser init)
-- Subsequent: fast (session reused)
-- Streaming latency: ~1ms/chunk
-
-## Security
-
-`GATEWAY_API_KEY` enables Bearer token auth.
-Credentials stored in `~/.config/token-free-gateway/`.
-
-## Advanced
-
-Run with custom port: `PORT=3457 token-free-gateway start`
-Build binary: `bun run build`
-
-## FAQ
-
-**Q: Works with OpenAI SDKs?** A: Yes, set `base_url=http://localhost:3456/v1`.
-
-## ChatGPT Notes
-
-Falls back to DOM simulation on 403. Slower but more reliable.
-
-## DeepSeek Notes
-
-Handles Proof-of-Work challenge automatically via embedded WASM.
-
-## Gemini Notes
-
-Uses Playwright for page interaction (no direct API endpoint).
-
-## Known Limitations
-
-- Requires local Chrome
-- Sessions expire (re-run webauth)
-- Not for high-volume production
-
-## Release Notes
-
-### v0.5.0 (upcoming)
-- 13 providers
-- Streaming support
-- Background daemon
-- Tool calling
-
-## Multi-Provider
-
-Run multiple instances on different ports for load balancing.
-
-## Cancellation
-
-Requests can be cancelled by closing the client connection.
-
-## Perplexity Notes
-
-Citation markers are stripped from responses.
-
-## Grok Notes
-
-Uses grok.x.com API. Re-authorize if site changes.
-
-## Kimi Notes
-
-Uses refresh tokens for session management.
-
-## Qwen Notes
-
-Supports both domestic and international Qwen endpoints.
-
-## GLM Notes
-
-GLM and GLM-intl are separate providers with separate auth.
-
-## Docker
-
-Docker image not yet provided. Use binary or Bun directly.
-
-## Provider Integration
-
-All providers use CDP-based session capture except Gemini (Playwright).
-
-## Contributing
-
-PRs welcome. Run `bun run check` before submitting.
-
-## OpenAI SDK Integration
-
-```python
-from openai import OpenAI
-client = OpenAI(base_url="http://localhost:3456/v1", api_key="none")
-```
-
-## API Examples
-
-```bash
-# Chat
-curl http://localhost:3456/v1/chat/completions -d '{...}'
-# Models
-curl http://localhost:3456/v1/models
-# Health
-curl http://localhost:3456/health
-```
-
-## Provider Comparison
-
-| Provider | Auth Method | Streaming | Notes |
-|----------|------------|-----------|-------|
-| Claude | Cookie | SSE | Fastest |
-| ChatGPT | Session | SSE/DOM | DOM fallback |
-| DeepSeek | Cookie+PoW | SSE | WASM solver |
-
-## Version History
-
-- v0.5.0: 13 providers, streaming, daemon mode
-- v0.1.0: Initial release with Claude only
+- **One endpoint, 13 providers** — Claude, ChatGPT, DeepSeek, Doubao, Gemini, GLM, GLM Intl, Grok, Kimi, Perplexity, Qwen, Qwen CN, Xiaomi MiMo
+- **100% OpenAI-compatible** — `/v1/chat/completions`, `/v1/models`, streaming, tool_calls — zero client-side changes
+- **Full Function Calling** — tools are injected as prompts, responses are parsed back into standard `tool_calls`
+- **Cross-platform binary** — single executable for macOS, Linux, and Windows
+- **Daemon mode** — `start` / `stop` / `restart` / `status` like a proper service
 
 ---
 
-*See [CHANGELOG](CHANGELOG.md) for full release history.*
+## Quick Start
+
+### 1. Install
+
+**Prebuilt binary** (recommended) — download from [GitHub Releases](../../releases):
+
+```bash
+tar xzf token-free-gateway-<platform>.tar.gz
+chmod +x token-free-gateway
+```
+
+**From source:**
+
+```bash
+git clone <repo-url> && cd token-free-gateway
+bun install
+bun run build    # → ./token-free-gateway
+```
+
+### 2. Launch Chrome debug mode
+
+```bash
+./token-free-gateway chrome
+```
+
+A dedicated Chrome instance opens with login pages for all 13 providers.
+
+### 3. Log in & authorize
+
+Log in to providers in the browser tabs, then run the wizard:
+
+```bash
+./token-free-gateway webauth
+```
+
+Select which providers to authorize. Credentials are saved to `~/.token-free-gateway/auth-profiles.json`.
+
+> **DeepSeek:** keep the DeepSeek chat page open while running `webauth` — the wizard captures the bearer token from the live session.
+>
+> **Tip:** if the terminal doesn't return after authorization, press **Ctrl+C** — credentials are already saved.
+
+### 4. Start the gateway
+
+```bash
+./token-free-gateway start      # background daemon
+./token-free-gateway serve      # foreground (for debugging)
+```
+
+The gateway listens on `http://localhost:3456`.
+
+### 5. Use it
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:3456/v1",
+    api_key="any-string",
+)
+
+response = client.chat.completions.create(
+    model="claude-sonnet-4-20250514",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+```
+
+---
+
+## Supported Providers
+
+| Provider    | Model ID prefix | Auth Method           | Client         |
+| ----------- | --------------- | --------------------- | -------------- |
+| Claude      | `claude-*`      | Session cookie        | Fetch          |
+| ChatGPT     | `chatgpt-*`     | Access token + cookie | Playwright CDP |
+| DeepSeek    | `deepseek-*`    | Bearer token + cookie | Fetch (PoW)    |
+| Doubao      | `doubao-*`      | Session cookie        | Fetch          |
+| Gemini      | `gemini-*`      | Google SID cookie     | Playwright CDP |
+| GLM (智谱)  | `glm-*`         | Refresh token cookie  | Playwright CDP |
+| GLM Intl    | `glm-intl-*`    | Session cookie        | Playwright CDP |
+| Grok        | `grok-*`        | SSO cookie            | Playwright CDP |
+| Kimi        | `kimi-*`        | Access token          | Playwright CDP |
+| Perplexity  | `perplexity-*`  | Next-auth cookie      | Playwright CDP |
+| Qwen        | `qwen-*`        | Session cookie        | Playwright CDP |
+| Qwen CN     | `qwen-cn-*`     | XSRF + cookie         | Playwright CDP |
+| Xiaomi MiMo | `xiaomimo-*`    | Bearer token          | Fetch          |
+
+> Playwright CDP providers require `playwright-core` at runtime: `npm i -g playwright-core`
+
+---
+
+## CLI Reference
+
+```
+token-free-gateway [command] [options]
+
+Commands:
+  serve               Start in foreground (default)
+  start               Start as background daemon
+  stop                Stop the daemon
+  restart             Restart the daemon
+  status              Show running status
+  webauth             Authorize web AI providers
+  chrome [start|stop] Launch/stop Chrome debug mode
+
+Options:
+  --help, -h          Show help
+  --version, -v       Show version
+```
+
+---
+
+## Configuration
+
+| Variable          | Default                 | Description                                   |
+| ----------------- | ----------------------- | --------------------------------------------- |
+| `PORT`            | `3456`                  | Server port                                   |
+| `GATEWAY_API_KEY` | _(empty)_               | Bearer token for client auth; empty = no auth |
+| `CDP_URL`         | `http://127.0.0.1:9222` | Chrome DevTools Protocol endpoint             |
+
+Create a `.env` file next to the binary:
+
+```bash
+PORT=3456
+GATEWAY_API_KEY=my-secret-key
+```
+
+---
+
+## API Endpoints
+
+| Method | Path                   | Description                                  |
+| ------ | ---------------------- | -------------------------------------------- |
+| `POST` | `/v1/chat/completions` | Chat completions (streaming + non-streaming) |
+| `GET`  | `/v1/models`           | List models from authorized providers        |
+| `GET`  | `/v1/models/:id`       | Get model details                            |
+| `GET`  | `/health`              | Health check                                 |
+
+---
+
+## How It Works
+
+```mermaid
+sequenceDiagram
+    participant C as Client (OpenAI SDK)
+    participant G as Token-Free Gateway
+    participant P as Web AI Provider
+
+    C->>G: POST /v1/chat/completions<br/>(messages + tools)
+    G->>G: tools → prompt injection<br/>route to provider
+    G->>P: Send prompt via web session
+    P-->>G: Free-form text response
+    G->>G: Parse text → tool_calls
+    G-->>C: OpenAI-format tool_calls
+
+    Note over C: Client executes tools locally
+
+    C->>G: POST /v1/chat/completions<br/>(messages + tool results)
+    G->>P: Forward tool results
+    P-->>G: Final text response
+    G-->>C: Final answer
+```
+
+The gateway converts OpenAI's structured `tools` definitions into prompt-injected instructions, sends them to the web AI, and parses the free-form text response back into standard `tool_calls`. The client never knows it's not talking to OpenAI.
+
+---
+
+## Platform Compatibility
+
+| Feature                          | macOS | Linux | Windows         |
+| -------------------------------- | ----- | ----- | --------------- |
+| Gateway (`serve`/`start`/`stop`) | ✅    | ✅    | ✅              |
+| `chrome` command                 | ✅    | ✅    | ✅              |
+| `start-chrome-debug.sh`          | ✅    | ✅    | ⚠️ WSL/Git Bash |
+| All providers                    | ✅    | ✅    | ✅              |
+
+---
+
+## Dev Scripts
+
+```bash
+bun run dev         # Dev server with hot reload
+bun run test        # Unit tests
+bun run check       # Biome lint + format check
+bun run lint:fix    # Auto-fix all issues
+bun run typecheck   # TypeScript check
+bun run build       # Compile standalone binary
+```
+
+---
+
+## Troubleshooting
+
+| Problem                    | Solution                                                         |
+| -------------------------- | ---------------------------------------------------------------- |
+| `/v1/models` returns empty | Run `token-free-gateway webauth` to authorize providers          |
+| webauth hangs              | Press **Ctrl+C** — credentials are saved                         |
+| Chrome won't start         | Check port 9222: `lsof -i:9222` / `netstat -ano \| findstr 9222` |
+| Playwright errors          | Install `playwright-core`: `npm i -g playwright-core`            |
+| DeepSeek auth fails        | Keep DeepSeek chat page open during `webauth`                    |
+
+---
+
+## Acknowledgments
+
+This project was distilled and redesigned from [openclaw-zero-token](https://github.com/linuxhsj/openclaw-zero-token), extracting the web AI provider layer and OpenAI compatibility module into a standalone, lightweight gateway focused purely on protocol conversion.
+
+## License
+
+MIT
