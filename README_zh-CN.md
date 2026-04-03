@@ -36,3 +36,8 @@ token-free-gateway start
 | `PORT` | `3456` | 服务器端口 |
 | `GATEWAY_API_KEY` | — | 可选 API 密钥 |
 | `CDP_URL` | `http://127.0.0.1:9222` | Chrome 调试地址 |
+
+## 常见问题
+
+**Chrome 无法连接**：运行 `token-free-gateway chrome start`。
+**认证过期**：重新运行 `token-free-gateway webauth`。
