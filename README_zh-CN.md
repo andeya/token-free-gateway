@@ -41,3 +41,9 @@ token-free-gateway start
 
 **Chrome 无法连接**：运行 `token-free-gateway chrome start`。
 **认证过期**：重新运行 `token-free-gateway webauth`。
+
+## 架构
+
+```
+客户端 → 网关 → Chrome (CDP) → AI 提供商网站
+```
