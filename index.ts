@@ -24,9 +24,6 @@ Options:
   --help, -h          Show this help message
   --version, -v       Show version
 
-Notes:
-  Run 'chrome start' before 'webauth' for first-time setup.
-
 Environment:
   PORT                Server port (default: 3456)
   GATEWAY_API_KEY     API key for client authentication (optional)
