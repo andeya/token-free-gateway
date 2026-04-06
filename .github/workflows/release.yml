@@ -73,7 +73,6 @@ jobs:
         run: |
           cd dist
           if ls ${{ matrix.artifact }}.exe 1>/dev/null 2>&1; then
-            mv ${{ matrix.artifact }}.exe ${{ matrix.artifact }}.exe
             tar czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}.exe
           else
             tar czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
