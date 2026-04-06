@@ -1,5 +1,7 @@
 # Token-Free Gateway
 
+[![CI](https://github.com/owner/token-free-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/owner/token-free-gateway/actions/workflows/ci.yml)
+
 **[中文文档](README_zh-CN.md)**
 
 Use ChatGPT, Claude, Gemini, DeepSeek, and 9 more AI models — **completely free, no API keys required**. Just log in via browser.
