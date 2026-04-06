@@ -29,6 +29,13 @@
 		}
 	},
 	"files": {
-		"includes": ["**", "!**/node_modules", "!**/dist", "!**/*.lock", "!**/coverage"]
-	}
+		"includes": [
+			"**",
+			"!**/node_modules",
+			"!**/dist",
+			"!**/*.lock",
+			"!**/coverage"
+		]
+	},
+	"_updated": "2026-04-06"
 }
