@@ -39,7 +39,7 @@ chmod +x token-free-gateway
 **From source:**
 
 ```bash
-git clone <repo-url> && cd token-free-gateway
+git clone https://github.com/andeya/token-free-gateway.git && cd token-free-gateway
 bun install
 bun run build    # → ./token-free-gateway
 ```
