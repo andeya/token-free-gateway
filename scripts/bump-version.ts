@@ -44,10 +44,7 @@ function readRootVersion(): string {
 	return pkg.version;
 }
 
-function incrementVersion(
-	current: string,
-	level: (typeof INCREMENTS)[number],
-): string {
+function incrementVersion(current: string, level: (typeof INCREMENTS)[number]): string {
 	const parts = current.split(".").map(Number);
 	const idx = INCREMENTS.indexOf(level);
 	parts[idx] += 1;
@@ -55,11 +52,7 @@ function incrementVersion(
 	return parts.join(".");
 }
 
-function updatePackageJson(
-	relDir: string,
-	version: string,
-	isRoot = false,
-): void {
+function updatePackageJson(relDir: string, version: string, isRoot = false): void {
 	const pkgPath = path.join(ROOT, relDir, "package.json");
 	if (!existsSync(pkgPath)) {
 		console.warn(`  ⚠ ${pkgPath} not found, skipping`);
@@ -91,9 +84,7 @@ function main(): void {
 
 	if (!arg) {
 		console.log(`\nCurrent version: ${current}\n`);
-		console.log(
-			"Usage: bun scripts/bump-version.ts [patch|minor|major|<version>]\n",
-		);
+		console.log("Usage: bun scripts/bump-version.ts [patch|minor|major|<version>]\n");
 		return;
 	}
 
@@ -116,9 +107,7 @@ function main(): void {
 	}
 
 	console.log(`\nDone. All files updated to ${version}.`);
-	console.log(
-		`Next: commit, then tag with: git tag v${version} && git push origin v${version}\n`,
-	);
+	console.log(`Next: commit, then tag with: git tag v${version} && git push origin v${version}\n`);
 }
 
 main();
