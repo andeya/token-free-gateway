@@ -1,11 +1,10 @@
 import { authenticate } from "./auth.ts";
 import { BrowserManager } from "./browser/manager.ts";
-import { ensureConfigFile, loadConfig } from "./config.ts";
+import { loadConfig } from "./config.ts";
 import { handleChatCompletions } from "./openai/chat-completions.ts";
 import { listAuthorizedProviders } from "./providers/auth-store.ts";
 import { getClientForModel, listAllModels, resolveModelToProvider } from "./providers/registry.ts";
 
-ensureConfigFile();
 const config = loadConfig();
 
 const CORS_HEADERS: Record<string, string> = {

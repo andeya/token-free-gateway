@@ -1,5 +1,5 @@
 import pkg from "./package.json";
-import { CONFIG_FILE_PATH } from "./src/config.ts";
+import { CONFIG_FILE_PATH, ensureConfigFile } from "./src/config.ts";
 
 const VERSION = pkg.version;
 const args = process.argv.slice(2);
@@ -44,6 +44,9 @@ if (command === "--version" || command === "-v") {
 	console.log(`token-free-gateway ${VERSION}`);
 	process.exit(0);
 }
+
+// Ensure config file exists for every command (non-fatal, best-effort)
+ensureConfigFile();
 
 if (command === "webauth") {
 	await import("./src/cli/webauth.ts");
