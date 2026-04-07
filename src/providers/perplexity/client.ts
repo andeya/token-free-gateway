@@ -1,9 +1,5 @@
-import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { PerplexityWebAuth } from "./auth.ts";
 import { parsePerplexityStream } from "./stream.ts";
@@ -15,8 +11,6 @@ const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export class PerplexityWebClient implements WebProviderClient {
 	readonly providerId = "perplexity-web";
 	private options: PerplexityWebAuth;
-	private browser: Browser | null = null;
-	private context: BrowserContext | null = null;
 	private page: Page | null = null;
 	private initialized = false;
 
@@ -45,43 +39,9 @@ export class PerplexityWebClient implements WebProviderClient {
 			return;
 		}
 
-		const cdpUrl = getDefaultCdpUrl();
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) break;
-			await new Promise((r) => setTimeout(r, 500));
-		}
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode.`,
-			);
-		}
-
-		const connectedBrowser = await chromium.connectOverCDP(wsUrl, {
-			headers: getHeadersWithAuth(wsUrl),
-		});
-		this.browser = connectedBrowser;
-		this.context = connectedBrowser.contexts()[0] ?? null;
-		if (!this.context) throw new Error("No browser context");
-
-		const pages = this.context.pages();
-		const perplexityPage = pages.find((p) => p.url().includes("perplexity.ai"));
-		if (perplexityPage) {
-			this.page = perplexityPage;
-		} else {
-			this.page = await this.context.newPage();
-			await this.page.goto(PERPLEXITY_BASE_URL, { waitUntil: "domcontentloaded" });
-		}
-
-		const cookies = this.parseCookies();
-		if (cookies.length > 0) {
-			try {
-				await this.context.addCookies(cookies);
-			} catch (e) {
-				console.warn("[PerplexityWeb] Failed to add some cookies:", e);
-			}
-		}
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("perplexity.ai", PERPLEXITY_BASE_URL);
+		await bm.addCookies(this.parseCookies());
 
 		this.initialized = true;
 	}
@@ -208,18 +168,7 @@ export class PerplexityWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		if (this.page) {
-			await this.page.close();
-			this.page = null;
-		}
-		if (this.context) {
-			await this.context.close();
-			this.context = null;
-		}
-		if (this.browser) {
-			await this.browser.close();
-			this.browser = null;
-		}
+		this.page = null;
 		this.initialized = false;
 	}
 }

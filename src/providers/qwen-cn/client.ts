@@ -1,10 +1,5 @@
-import type { BrowserContext, Page } from "playwright-core";
-import { chromium } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { type BrowserCookie, BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { QwenCNWebAuth } from "./auth.ts";
 import { parseQwenCnStream } from "./stream.ts";
@@ -17,7 +12,6 @@ export class QwenCNWebClient implements WebProviderClient {
 	private deviceId: string;
 	private ut: string;
 	private readonly baseUrl = "https://chat2.qianwen.com";
-	private browser: BrowserContext | null = null;
 	private page: Page | null = null;
 
 	constructor(auth: QwenCNWebAuth) {
@@ -37,47 +31,22 @@ export class QwenCNWebClient implements WebProviderClient {
 		this.deviceId = this.ut || randomId();
 	}
 
-	private async ensureBrowser() {
-		if (this.browser && this.page) {
-			return { browser: this.browser, page: this.page };
-		}
-
-		const cdpUrl = getDefaultCdpUrl();
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) {
-				break;
+	private async ensurePage(): Promise<Page> {
+		if (this.page) {
+			try {
+				await this.page.evaluate(() => document.readyState);
+			} catch {
+				this.page = null;
 			}
-			await new Promise((r) => setTimeout(r, 500));
 		}
 
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode.`,
-			);
+		if (this.page) {
+			return this.page;
 		}
 
-		const cdpBrowser = await chromium.connectOverCDP(wsUrl, {
-			headers: getHeadersWithAuth(wsUrl),
-		});
-		const ctx = cdpBrowser.contexts()[0];
-		if (!ctx) {
-			throw new Error("CDP connection returned no browser context");
-		}
-		this.browser = ctx;
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("qianwen.com", "https://www.qianwen.com/");
 
-		const pages = ctx.pages();
-		const qwenPage = pages.find((p) => p.url().includes("qianwen.com"));
-
-		if (qwenPage) {
-			this.page = qwenPage;
-		} else {
-			this.page = await ctx.newPage();
-			await this.page.goto("https://www.qianwen.com/", { waitUntil: "domcontentloaded" });
-		}
-
-		const browserForCookies = this.browser;
 		const toAdd = this.cookies.map((c) => ({
 			name: c.name,
 			value: c.value,
@@ -90,20 +59,14 @@ export class QwenCNWebClient implements WebProviderClient {
 		}));
 
 		if (toAdd.length > 0) {
-			try {
-				await browserForCookies.addCookies(toAdd);
-			} catch (err) {
-				console.warn(
-					`[Qwen CN Web] addCookies failed (page may already have session): ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
+			await bm.addCookies(toAdd as BrowserCookie[]);
 		}
 
-		return { browser: this.browser, page: this.page };
+		return this.page;
 	}
 
 	async init(): Promise<void> {
-		await this.ensureBrowser();
+		await this.ensurePage();
 	}
 
 	async sendMessage(params: {
@@ -111,7 +74,7 @@ export class QwenCNWebClient implements WebProviderClient {
 		model?: string;
 		signal?: AbortSignal;
 	}): Promise<ReadableStream<Uint8Array>> {
-		const { page } = await this.ensureBrowser();
+		const page = await this.ensurePage();
 
 		const model = params.model || "Qwen3.5-Plus";
 		const sessionId = randomSessionId();
@@ -248,7 +211,6 @@ export class QwenCNWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		this.browser = null;
 		this.page = null;
 	}
 }

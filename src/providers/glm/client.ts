@@ -1,10 +1,6 @@
 import crypto from "node:crypto";
-import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { GlmWebAuth } from "./auth.ts";
 import { parseGlmStream } from "./stream.ts";
@@ -49,8 +45,6 @@ function generateSign(): { timestamp: string; nonce: string; sign: string } {
 export class GlmWebClient implements WebProviderClient {
 	readonly providerId = "glm-web";
 	private options: GlmWebAuth;
-	private browser: Browser | null = null;
-	private context: BrowserContext | null = null;
 	private page: Page | null = null;
 	private initialized = false;
 	private accessToken: string | null = null;
@@ -93,43 +87,9 @@ export class GlmWebClient implements WebProviderClient {
 			return;
 		}
 
-		const cdpUrl = getDefaultCdpUrl();
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) break;
-			await new Promise((r) => setTimeout(r, 500));
-		}
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode (./start-chrome-debug.sh)`,
-			);
-		}
-
-		const connectedBrowser = await chromium.connectOverCDP(wsUrl, {
-			headers: getHeadersWithAuth(wsUrl),
-		});
-		this.browser = connectedBrowser;
-		this.context = connectedBrowser.contexts()[0] ?? null;
-		if (!this.context) throw new Error("No browser context");
-
-		const pages = this.context.pages();
-		const zPage = pages.find((p) => p.url().includes("chatglm.cn"));
-		if (zPage) {
-			this.page = zPage;
-		} else {
-			this.page = await this.context.newPage();
-			await this.page.goto("https://chatglm.cn", { waitUntil: "domcontentloaded" });
-		}
-
-		const cookies = this.parseCookies();
-		if (cookies.length > 0) {
-			try {
-				await this.context.addCookies(cookies);
-			} catch (e) {
-				console.warn("[GlmWeb] Failed to add some cookies:", e);
-			}
-		}
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("chatglm.cn", "https://chatglm.cn");
+		await bm.addCookies(this.parseCookies());
 
 		await this.refreshAccessToken();
 
@@ -143,17 +103,17 @@ export class GlmWebClient implements WebProviderClient {
 			return;
 		}
 
-		if (this.context) {
-			try {
-				const browserCookies = await this.context.cookies(["https://chatglm.cn"]);
-				const browserToken = browserCookies.find((c) => c.name === "chatglm_token");
-				if (browserToken?.value) {
-					this.accessToken = browserToken.value;
-					return;
-				}
-			} catch {
-				// ignore
+		try {
+			const bm = BrowserManager.getInstance();
+			const ctx = await bm.getContext();
+			const browserCookies = await ctx.cookies(["https://chatglm.cn"]);
+			const browserToken = browserCookies.find((c) => c.name === "chatglm_token");
+			if (browserToken?.value) {
+				this.accessToken = browserToken.value;
+				return;
 			}
+		} catch {
+			// ignore
 		}
 
 		const refreshToken = this.getRefreshToken();
@@ -395,18 +355,7 @@ export class GlmWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		if (this.page) {
-			await this.page.close();
-			this.page = null;
-		}
-		if (this.context) {
-			await this.context.close();
-			this.context = null;
-		}
-		if (this.browser) {
-			await this.browser.close();
-			this.browser = null;
-		}
+		this.page = null;
 		this.initialized = false;
 		this.accessToken = null;
 	}

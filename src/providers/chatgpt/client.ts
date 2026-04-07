@@ -1,11 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { BrowserContext, Page } from "playwright-core";
-import { chromium } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { ChatGPTWebAuth } from "./auth.ts";
 import { parseChatGPTStream } from "./stream.ts";
@@ -15,7 +10,6 @@ export class ChatGPTWebClient implements WebProviderClient {
 	private accessToken: string;
 	private cookie: string;
 	private userAgent: string;
-	private browser: BrowserContext | null = null;
 	private page: Page | null = null;
 	private conversationId: string | undefined;
 	private parentMessageId: string | undefined;
@@ -26,44 +20,24 @@ export class ChatGPTWebClient implements WebProviderClient {
 		this.userAgent = auth.userAgent || "Mozilla/5.0";
 	}
 
-	private async ensureBrowser(): Promise<{ browser: BrowserContext; page: Page }> {
-		if (this.browser && this.page) {
-			return { browser: this.browser, page: this.page };
+	private async ensurePage(): Promise<Page> {
+		if (this.page) {
+			try {
+				await this.page.evaluate(() => document.readyState);
+			} catch {
+				this.page = null;
+			}
 		}
 
-		const cdpUrl = getDefaultCdpUrl();
-		console.log(`[ChatGPT Web] Connecting to Chrome at ${cdpUrl}`);
-
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) break;
-			await new Promise((r) => setTimeout(r, 500));
+		if (this.page) {
+			return this.page;
 		}
 
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode`,
-			);
-		}
+		const bm = BrowserManager.getInstance();
+		console.log(`[ChatGPT Web] Connecting via BrowserManager...`);
 
-		this.browser = (
-			await chromium.connectOverCDP(wsUrl, {
-				headers: getHeadersWithAuth(wsUrl),
-			})
-		).contexts()[0]!;
-
-		const pages = this.browser.pages();
-		const chatgptPage = pages.find((p) => p.url().includes("chatgpt.com"));
-
-		if (chatgptPage) {
-			console.log(`[ChatGPT Web] Found existing ChatGPT page: ${chatgptPage.url()}`);
-			this.page = chatgptPage;
-		} else {
-			console.log(`[ChatGPT Web] No ChatGPT page found, creating new one...`);
-			this.page = await this.browser.newPage();
-			await this.page.goto("https://chatgpt.com/", { waitUntil: "load" });
-		}
+		this.page = await bm.getPage("chatgpt.com", "https://chatgpt.com/");
+		console.log(`[ChatGPT Web] Using page: ${this.page.url()}`);
 
 		await this.ensureChatGptPageReady();
 		console.log(`[ChatGPT Web] Connected to Chrome successfully`);
@@ -81,17 +55,11 @@ export class ChatGPTWebClient implements WebProviderClient {
 			});
 			const cookies = rawCookies.filter((c) => c.name.length > 0);
 			if (cookies.length > 0) {
-				try {
-					await this.browser.addCookies(cookies);
-				} catch (err) {
-					console.warn(
-						`[ChatGPT Web] addCookies failed (page may already have session): ${err instanceof Error ? err.message : String(err)}`,
-					);
-				}
+				await bm.addCookies(cookies);
 			}
 		}
 
-		return { browser: this.browser, page: this.page };
+		return this.page;
 	}
 
 	private async ensureChatGptPageReady() {
@@ -119,7 +87,7 @@ export class ChatGPTWebClient implements WebProviderClient {
 		message: string;
 		signal?: AbortSignal;
 	}): Promise<ReadableStream<Uint8Array>> {
-		const { page } = await this.ensureBrowser();
+		const page = await this.ensurePage();
 
 		const inputSelectors = [
 			"#prompt-textarea",
@@ -200,7 +168,7 @@ export class ChatGPTWebClient implements WebProviderClient {
 	}
 
 	async init(): Promise<void> {
-		await this.ensureBrowser();
+		await this.ensurePage();
 	}
 
 	async sendMessage(params: {
@@ -208,7 +176,7 @@ export class ChatGPTWebClient implements WebProviderClient {
 		model?: string;
 		signal?: AbortSignal;
 	}): Promise<ReadableStream<Uint8Array>> {
-		const { page } = await this.ensureBrowser();
+		const page = await this.ensurePage();
 
 		const convId = this.conversationId ?? "new";
 		const parentMessageId = this.parentMessageId ?? randomUUID();
@@ -434,7 +402,6 @@ export class ChatGPTWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		this.browser = null;
 		this.page = null;
 	}
 }

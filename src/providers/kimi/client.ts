@@ -1,10 +1,5 @@
-import type { BrowserContext, Page } from "playwright-core";
-import { chromium } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { KimiWebAuth } from "./auth.ts";
 import { parseKimiStream } from "./stream.ts";
@@ -14,7 +9,6 @@ export class KimiWebClient implements WebProviderClient {
 	private cookie: string;
 	private accessToken: string;
 	private baseUrl = "https://www.kimi.com";
-	private browser: BrowserContext | null = null;
 	private page: Page | null = null;
 
 	constructor(auth: KimiWebAuth) {
@@ -22,42 +16,24 @@ export class KimiWebClient implements WebProviderClient {
 		this.accessToken = auth.accessToken || "";
 	}
 
-	private async ensureBrowser(): Promise<{ browser: BrowserContext; page: Page }> {
-		if (this.browser && this.page) {
-			return { browser: this.browser, page: this.page };
+	private async ensurePage(): Promise<Page> {
+		if (this.page) {
+			try {
+				await this.page.evaluate(() => document.readyState);
+			} catch {
+				this.page = null;
+			}
 		}
 
-		const cdpUrl = getDefaultCdpUrl();
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) break;
-			await new Promise((r) => setTimeout(r, 500));
-		}
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode (./start-chrome-debug.sh)`,
-			);
+		if (this.page) {
+			return this.page;
 		}
 
-		this.browser = (
-			await chromium.connectOverCDP(wsUrl, { headers: getHeadersWithAuth(wsUrl) })
-		).contexts()[0]!;
-		if (!this.browser) throw new Error("No browser context");
-
-		const pages = this.browser.pages();
-		const kimiPage = pages.find(
-			(p) => p.url().includes("kimi.com") || p.url().includes("moonshot.cn"),
-		);
-		if (kimiPage) {
-			this.page = kimiPage;
-		} else {
-			this.page = await this.browser.newPage();
-			await this.page.goto(`${this.baseUrl}/`, { waitUntil: "domcontentloaded" });
-		}
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("kimi.com", "https://www.kimi.com/");
 
 		if (this.cookie.trim()) {
-			const pageUrl = this.page?.url() ?? this.baseUrl;
+			const pageUrl = this.page.url() ?? this.baseUrl;
 			const domain = pageUrl.includes("moonshot.cn") ? ".moonshot.cn" : ".kimi.com";
 
 			const rawCookies = this.cookie.split(";").map((c) => {
@@ -86,21 +62,15 @@ export class KimiWebClient implements WebProviderClient {
 			});
 			const cookies = rawCookies.filter((c): c is NonNullable<typeof c> => c !== null);
 			if (cookies.length > 0) {
-				try {
-					await this.browser.addCookies(cookies);
-				} catch (err) {
-					console.warn(
-						`[KimiWeb] addCookies failed: ${err instanceof Error ? err.message : String(err)}`,
-					);
-				}
+				await bm.addCookies(cookies);
 			}
 		}
 
-		return { browser: this.browser, page: this.page! };
+		return this.page;
 	}
 
 	async init(): Promise<void> {
-		await this.ensureBrowser();
+		await this.ensurePage();
 	}
 
 	async sendMessage(params: {
@@ -108,9 +78,10 @@ export class KimiWebClient implements WebProviderClient {
 		model?: string;
 		signal?: AbortSignal;
 	}): Promise<ReadableStream<Uint8Array>> {
-		const { browser, page } = await this.ensureBrowser();
-
-		const cookies = await browser.cookies([this.baseUrl]);
+		const page = await this.ensurePage();
+		const bm = BrowserManager.getInstance();
+		const ctx = await bm.getContext();
+		const cookies = await ctx.cookies([this.baseUrl]);
 		const kimiAuthCookie = cookies.find((c) => c.name === "kimi-auth")?.value;
 		const authToken = this.accessToken || kimiAuthCookie;
 		if (!authToken) {
@@ -254,7 +225,6 @@ export class KimiWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		this.browser = null;
 		this.page = null;
 	}
 }

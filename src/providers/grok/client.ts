@@ -1,9 +1,5 @@
-import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { GrokWebAuth } from "./auth.ts";
 import { parseGrokStream } from "./stream.ts";
@@ -15,8 +11,6 @@ function delay(ms: number): Promise<void> {
 export class GrokWebClient implements WebProviderClient {
 	readonly providerId = "grok-web";
 	private options: GrokWebAuth;
-	private browser: Browser | null = null;
-	private context: BrowserContext | null = null;
 	private page: Page | null = null;
 	private initialized = false;
 	lastConversationId: string | undefined;
@@ -44,43 +38,9 @@ export class GrokWebClient implements WebProviderClient {
 	async init(): Promise<void> {
 		if (this.initialized) return;
 
-		const cdpUrl = getDefaultCdpUrl();
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) break;
-			await delay(500);
-		}
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode.`,
-			);
-		}
-
-		const connectedBrowser = await chromium.connectOverCDP(wsUrl, {
-			headers: getHeadersWithAuth(wsUrl),
-		});
-		this.browser = connectedBrowser;
-		this.context = connectedBrowser.contexts()[0] ?? null;
-		if (!this.context) throw new Error("No browser context from CDP");
-
-		const pages = this.context.pages();
-		const grokPage = pages.find((p) => p.url().includes("grok.com"));
-		if (grokPage) {
-			this.page = grokPage;
-		} else {
-			this.page = await this.context.newPage();
-			await this.page.goto("https://grok.com", { waitUntil: "domcontentloaded" });
-		}
-
-		const cookies = this.parseCookies();
-		if (cookies.length > 0) {
-			try {
-				await this.context.addCookies(cookies);
-			} catch (e) {
-				console.warn("[Grok Web] Failed to add some cookies:", e);
-			}
-		}
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("grok.com", "https://grok.com");
+		await bm.addCookies(this.parseCookies());
 
 		this.initialized = true;
 	}
@@ -402,11 +362,6 @@ export class GrokWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		if (this.browser) {
-			await this.browser.close();
-			this.browser = null;
-		}
-		this.context = null;
 		this.page = null;
 		this.initialized = false;
 	}

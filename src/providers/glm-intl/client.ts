@@ -1,9 +1,5 @@
-import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { GlmIntlWebAuth } from "./auth.ts";
 import { parseGlmIntlStream } from "./stream.ts";
@@ -11,8 +7,6 @@ import { parseGlmIntlStream } from "./stream.ts";
 export class GlmIntlWebClient implements WebProviderClient {
 	readonly providerId = "glm-intl-web";
 	private options: GlmIntlWebAuth;
-	private browser: Browser | null = null;
-	private context: BrowserContext | null = null;
 	private page: Page | null = null;
 	private initialized = false;
 
@@ -41,46 +35,9 @@ export class GlmIntlWebClient implements WebProviderClient {
 			return;
 		}
 
-		const cdpUrl = getDefaultCdpUrl();
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) break;
-			await new Promise((r) => setTimeout(r, 500));
-		}
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode (./start-chrome-debug.sh)`,
-			);
-		}
-
-		const connectedBrowser = await chromium.connectOverCDP(wsUrl, {
-			headers: getHeadersWithAuth(wsUrl),
-		});
-		this.browser = connectedBrowser;
-		this.context = connectedBrowser.contexts()[0] ?? null;
-		if (!this.context) throw new Error("No browser context");
-
-		const pages = this.context.pages();
-		const glmPage = pages.find((p) => p.url().includes("chat.z.ai"));
-		if (glmPage) {
-			this.page = glmPage;
-		} else {
-			this.page = await this.context.newPage();
-			await this.page.goto("https://chat.z.ai/", {
-				waitUntil: "domcontentloaded",
-				timeout: 120000,
-			});
-		}
-
-		const cookies = this.parseCookies();
-		if (cookies.length > 0) {
-			try {
-				await this.context.addCookies(cookies);
-			} catch (e) {
-				console.warn("[GlmIntlWeb] Failed to add some cookies:", e);
-			}
-		}
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("chat.z.ai", "https://chat.z.ai/");
+		await bm.addCookies(this.parseCookies());
 
 		this.initialized = true;
 	}
@@ -202,18 +159,7 @@ export class GlmIntlWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		if (this.page) {
-			await this.page.close();
-			this.page = null;
-		}
-		if (this.context) {
-			await this.context.close();
-			this.context = null;
-		}
-		if (this.browser) {
-			await this.browser.close();
-			this.browser = null;
-		}
+		this.page = null;
 		this.initialized = false;
 	}
 }

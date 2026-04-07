@@ -1,9 +1,5 @@
-import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { GeminiWebAuth } from "./auth.ts";
 import { parseGeminiStream } from "./stream.ts";
@@ -15,8 +11,6 @@ function delay(ms: number): Promise<void> {
 export class GeminiWebClient implements WebProviderClient {
 	readonly providerId = "gemini-web";
 	private options: GeminiWebAuth;
-	private browser: Browser | null = null;
-	private context: BrowserContext | null = null;
 	private page: Page | null = null;
 	private initialized = false;
 
@@ -43,43 +37,9 @@ export class GeminiWebClient implements WebProviderClient {
 	async init(): Promise<void> {
 		if (this.initialized) return;
 
-		const cdpUrl = getDefaultCdpUrl();
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) break;
-			await delay(500);
-		}
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode.`,
-			);
-		}
-
-		const connectedBrowser = await chromium.connectOverCDP(wsUrl, {
-			headers: getHeadersWithAuth(wsUrl),
-		});
-		this.browser = connectedBrowser;
-		this.context = connectedBrowser.contexts()[0] ?? null;
-		if (!this.context) throw new Error("No browser context from CDP");
-
-		const pages = this.context.pages();
-		const geminiPage = pages.find((p) => p.url().includes("gemini.google.com"));
-		if (geminiPage) {
-			this.page = geminiPage;
-		} else {
-			this.page = await this.context.newPage();
-			await this.page.goto("https://gemini.google.com/app", { waitUntil: "domcontentloaded" });
-		}
-
-		const cookies = this.parseCookies();
-		if (cookies.length > 0) {
-			try {
-				await this.context.addCookies(cookies);
-			} catch (e) {
-				console.warn("[Gemini Web] Failed to add some cookies:", e);
-			}
-		}
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("gemini.google.com", "https://gemini.google.com/app");
+		await bm.addCookies(this.parseCookies());
 
 		this.initialized = true;
 	}
@@ -290,11 +250,6 @@ export class GeminiWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		if (this.browser) {
-			await this.browser.close();
-			this.browser = null;
-		}
-		this.context = null;
 		this.page = null;
 		this.initialized = false;
 	}

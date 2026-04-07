@@ -1,11 +1,6 @@
 import crypto from "node:crypto";
-import type { BrowserContext, Page } from "playwright-core";
-import { chromium } from "playwright-core";
-import {
-	getChromeWebSocketUrl,
-	getDefaultCdpUrl,
-	getHeadersWithAuth,
-} from "../../browser/cdp-helpers.ts";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { QwenWebAuth } from "./auth.ts";
 import { parseQwenStream } from "./stream.ts";
@@ -16,7 +11,6 @@ export class QwenWebClient implements WebProviderClient {
 	private cookie: string;
 	private userAgent: string;
 	private readonly baseUrl = "https://chat.qwen.ai";
-	private browser: BrowserContext | null = null;
 	private page: Page | null = null;
 
 	constructor(auth: QwenWebAuth) {
@@ -25,42 +19,21 @@ export class QwenWebClient implements WebProviderClient {
 		this.userAgent = auth.userAgent || "Mozilla/5.0";
 	}
 
-	private async ensureBrowser() {
-		if (this.browser && this.page) {
-			return { browser: this.browser, page: this.page };
-		}
-
-		const cdpUrl = getDefaultCdpUrl();
-		let wsUrl: string | null = null;
-		for (let i = 0; i < 10; i++) {
-			wsUrl = await getChromeWebSocketUrl(cdpUrl, 2000);
-			if (wsUrl) {
-				break;
+	private async ensurePage(): Promise<Page> {
+		if (this.page) {
+			try {
+				await this.page.evaluate(() => document.readyState);
+			} catch {
+				this.page = null;
 			}
-			await new Promise((r) => setTimeout(r, 500));
 		}
 
-		if (!wsUrl) {
-			throw new Error(
-				`Failed to connect to Chrome at ${cdpUrl}. Make sure Chrome is running in debug mode.`,
-			);
+		if (this.page) {
+			return this.page;
 		}
 
-		this.browser = (
-			await chromium.connectOverCDP(wsUrl, {
-				headers: getHeadersWithAuth(wsUrl),
-			})
-		).contexts()[0]!;
-
-		const pages = this.browser.pages();
-		const qwenPage = pages.find((p) => p.url().includes("qwen.ai"));
-
-		if (qwenPage) {
-			this.page = qwenPage;
-		} else {
-			this.page = await this.browser.newPage();
-			await this.page.goto("https://chat.qwen.ai/", { waitUntil: "domcontentloaded" });
-		}
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("qwen.ai", "https://chat.qwen.ai/");
 
 		const cookies = this.cookie.split(";").map((c) => {
 			const [name, ...valueParts] = c.trim().split("=");
@@ -72,13 +45,13 @@ export class QwenWebClient implements WebProviderClient {
 			};
 		});
 
-		await this.browser.addCookies(cookies);
+		await bm.addCookies(cookies);
 
-		return { browser: this.browser, page: this.page };
+		return this.page;
 	}
 
 	async init(): Promise<void> {
-		await this.ensureBrowser();
+		await this.ensurePage();
 	}
 
 	async sendMessage(params: {
@@ -86,7 +59,7 @@ export class QwenWebClient implements WebProviderClient {
 		model?: string;
 		signal?: AbortSignal;
 	}): Promise<ReadableStream<Uint8Array>> {
-		const { page } = await this.ensureBrowser();
+		const page = await this.ensurePage();
 
 		const model = params.model || "qwen3.5-plus";
 
@@ -275,7 +248,6 @@ export class QwenWebClient implements WebProviderClient {
 	}
 
 	async close(): Promise<void> {
-		this.browser = null;
 		this.page = null;
 	}
 }
