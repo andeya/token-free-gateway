@@ -82,7 +82,8 @@ jobs:
         run: |
           bun build index.ts \
             --compile \
-            --external playwright-core \
+            --external chromium-bidi \
+            --external electron \
             --target=${{ matrix.target }} \
             --outfile=dist/${{ matrix.artifact }}
 
@@ -231,7 +232,7 @@ jobs:
           echo "./token-free-gateway --help" >> notes.md
           echo '```' >> notes.md
           echo "" >> notes.md
-          echo "> **Note:** \`playwright-core\` is required at runtime for browser-based providers. Install it via \`npm i -g playwright-core\` or keep \`node_modules\` alongside the binary." >> notes.md
+          echo "> \`playwright-core\` is bundled inside the binary — no extra runtime dependencies. Just install Chrome or Chromium." >> notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
