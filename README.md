@@ -28,12 +28,11 @@ Token-Free Gateway is a lightweight OpenAI-compatible API server that turns web-
 
 ## Prerequisites
 
-| Requirement | Details |
-| ----------- | ------- |
-| **Chrome (or Chromium)** | Install from [google.com/chrome](https://www.google.com/chrome/) or your OS package manager. Keep it updated to a **recent stable** version. The gateway controls your browser over CDP — it does **not** embed a browser. |
-| **Node.js 18+** *(npm install only)* | Required only if you install via `npm install -g`. Not needed for prebuilt binaries or building from source. |
+**Chrome (or Chromium)** — Install from [google.com/chrome](https://www.google.com/chrome/) or your OS package manager. Keep it updated to a **recent stable** version. The gateway controls your browser over CDP — it does **not** embed a browser.
 
-> **Does my Chrome version need to "match" something?** — No. The gateway connects to your Chrome's debug WebSocket; CDP stays compatible across recent Chrome versions. No `playwright install` is required — the bundled `playwright-core` is only used as a CDP library, not for launching browsers.
+That's it. `playwright-core` is bundled in the binary; no `playwright install`, no extra runtime dependencies.
+
+> **Does my Chrome version need to "match" something?** — No. The gateway connects to your Chrome's debug WebSocket; CDP stays compatible across recent Chrome versions.
 
 ---
 

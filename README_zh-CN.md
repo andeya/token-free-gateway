@@ -28,12 +28,11 @@ Token-Free Gateway 是一个轻量级 OpenAI 兼容 API 网关，将网页端 AI
 
 ## 环境准备
 
-| 依赖 | 说明 |
-| ---- | ---- |
-| **Chrome（或 Chromium）** | 从 [google.com/chrome](https://www.google.com/chrome/) 或系统包管理器安装，保持**较新稳定版**即可。网关通过 CDP 控制你本机浏览器，**不包含**内置浏览器。 |
-| **Node.js 18+** *（仅 npm 安装时需要）* | 仅当你通过 `npm install -g` 安装时需要。预编译二进制或源码构建无需 Node.js。 |
+**Chrome（或 Chromium）** — 从 [google.com/chrome](https://www.google.com/chrome/) 或系统包管理器安装，保持**较新稳定版**即可。网关通过 CDP 控制你本机浏览器，**不包含**内置浏览器。
 
-> **Chrome 版本要和某个版本一致吗？** — **不需要。** 网关通过 WebSocket 连接 Chrome 远程调试端口，CDP 在近期版本间通常兼容。也**不需要**执行 `playwright install` —— 打包在二进制中的 `playwright-core` 仅用作 CDP 连接库，不会下载/启动自带浏览器。
+仅此而已。`playwright-core` 已内置于二进制中，无需执行 `playwright install`，无需额外运行时依赖。
+
+> **Chrome 版本要和某个版本一致吗？** — **不需要。** 网关通过 WebSocket 连接 Chrome 远程调试端口，CDP 在近期版本间通常兼容。
 
 ---
 
