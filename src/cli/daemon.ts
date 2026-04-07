@@ -2,6 +2,8 @@ import { closeSync, openSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getChromeWebSocketUrl, getDefaultCdpUrl } from "../browser/cdp-helpers.ts";
+import { startChrome } from "./chrome.ts";
 
 const DATA_DIR = join(homedir(), ".token-free-gateway");
 const PID_FILE = join(DATA_DIR, "gateway.pid");
@@ -60,15 +62,48 @@ function buildSpawnCmd(): string[] {
 	return [process.execPath, "__serve"];
 }
 
+async function ensureChromeReady(): Promise<void> {
+	const cdpUrl = getDefaultCdpUrl();
+	const ws = await getChromeWebSocketUrl(cdpUrl, 3000);
+	if (ws) {
+		console.log("Chrome debug mode: ready");
+		return;
+	}
+
+	console.log("Chrome debug mode not detected, starting Chrome...");
+	try {
+		await startChrome();
+		// Wait for Chrome to become reachable
+		for (let i = 0; i < 10; i++) {
+			await Bun.sleep(500);
+			if (await getChromeWebSocketUrl(cdpUrl, 2000)) {
+				console.log("Chrome debug mode: ready");
+				return;
+			}
+		}
+		console.warn(
+			"Chrome started but CDP endpoint not reachable yet — gateway will retry on first request",
+		);
+	} catch (err) {
+		console.warn(
+			`Failed to auto-start Chrome: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		console.warn("Please start Chrome manually: token-free-gateway chrome start");
+	}
+}
+
 export async function startDaemon() {
 	await ensureDataDir();
 
 	const existing = readPid();
 	if (existing && isRunning(existing)) {
-		console.log(`Gateway is already running (PID: ${existing})`);
+		const port = process.env.PORT || "3456";
+		console.log(`Gateway is already running (PID: ${existing}) on http://localhost:${port}`);
 		console.log(`Logs: ${LOG_FILE}`);
 		return;
 	}
+
+	await ensureChromeReady();
 
 	const logFd = openSync(LOG_FILE, "a");
 
@@ -91,8 +126,17 @@ export async function startDaemon() {
 	await Bun.sleep(600);
 
 	if (proc.pid && isRunning(proc.pid)) {
+		const port = process.env.PORT || "3456";
 		console.log(`Gateway started (PID: ${proc.pid})`);
+		console.log(`Listening on http://localhost:${port}`);
 		console.log(`Logs: ${LOG_FILE}`);
+		console.log("");
+		console.log("Usage:");
+		console.log(`  curl http://localhost:${port}/v1/models`);
+		console.log(`  curl http://localhost:${port}/health`);
+		console.log("");
+		console.log("Or use any OpenAI SDK client:");
+		console.log(`  base_url = "http://localhost:${port}/v1"`);
 	} else {
 		await removePidFile();
 		console.error(`Failed to start gateway. Check logs: ${LOG_FILE}`);
