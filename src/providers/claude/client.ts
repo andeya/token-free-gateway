@@ -3,99 +3,78 @@
  * Sends messages to claude.ai API using Chrome browser context to bypass
  * Cloudflare bot protection, similar to ChatGPT and Kimi clients.
  */
-
 import type { Page } from "playwright-core";
-import { BrowserManager } from "../../browser/manager.ts";
-import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
+import { pasteText } from "../../browser/dom-input.ts";
+import { BaseApiClient } from "../factory/base-api-client.ts";
+import type { ApiClientConfig, NormalizedSendParams } from "../factory/types.ts";
+import { parseCookieHeader } from "../shared/cookie-parser.ts";
+import type { EvalResult } from "../shared/eval-helpers.ts";
+import { textToStream } from "../shared/stream-helpers.ts";
+import type { StreamResult } from "../types.ts";
+import { SessionExpiredError, withTimeout } from "../types.ts";
 import type { ClaudeWebAuth } from "./auth.ts";
 import { parseClaudeStream } from "./stream.ts";
 
-export class ClaudeWebClient implements WebProviderClient {
-	readonly providerId = "claude-web";
-	private cookie: string;
-	private organizationId?: string;
-	private userAgent: string;
-	private readonly baseUrl = "https://claude.ai/api";
+const SEND_TIMEOUT_MS = 120_000;
 
-	private page: Page | null = null;
+export class ClaudeWebClient extends BaseApiClient<ClaudeWebAuth> {
+	readonly providerId = "claude-web";
+
+	protected readonly config: ApiClientConfig = {
+		hostKey: "claude.ai",
+		startUrl: "https://claude.ai/",
+		cookieDomain: ".claude.ai",
+		defaultModel: "claude-sonnet-4-20250514",
+		models: [
+			{ id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
+			{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+			{ id: "claude-opus-4-20250514", name: "Claude Opus 4" },
+			{ id: "claude-opus-4-6", name: "Claude Opus 4.6" },
+			{ id: "claude-haiku-4-20250514", name: "Claude Haiku 4" },
+			{ id: "claude-haiku-4-6", name: "Claude Haiku 4.6" },
+		],
+	};
+
+	private readonly baseUrl = "https://claude.ai/api";
+	private organizationId?: string;
+	private cookie: string;
 
 	constructor(auth: ClaudeWebAuth) {
+		super(auth);
 		this.cookie = auth.cookie || `sessionKey=${auth.sessionKey}`;
 		this.organizationId = auth.organizationId;
-		this.userAgent =
-			auth.userAgent ||
-			"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 	}
 
-	private async ensurePage(): Promise<Page> {
-		if (this.page) {
-			try {
-				await this.page.evaluate(() => document.readyState);
-				return this.page;
-			} catch {
-				this.page = null;
-			}
-		}
-		const bm = BrowserManager.getInstance();
-		this.page = await bm.getPage("claude.ai", "https://claude.ai/");
-		if (this.cookie) {
-			if (this.cookie.trim() && !this.cookie.startsWith("{")) {
-				const cookies = this.cookie
-					.split(";")
-					.map((c) => {
-						const [name, ...valueParts] = c.trim().split("=");
-						return {
-							name: name?.trim() ?? "",
-							value: valueParts.join("=").trim(),
-							domain: ".claude.ai",
-							path: "/",
-						};
-					})
-					.filter((c) => c.name.length > 0);
-				await bm.addCookies(cookies);
-			}
-		}
-		return this.page;
+	protected getCookies() {
+		return parseCookieHeader(this.cookie, this.config.cookieDomain);
 	}
 
-	async init(): Promise<void> {
-		const page = await this.ensurePage();
-
+	protected override async onInit(): Promise<void> {
 		if (this.organizationId) return;
-
-		// Discover organization ID via browser-side fetch
 		try {
+			const page = await this.getPage();
 			const orgResult = await page.evaluate(async (baseUrl: string) => {
 				const res = await fetch(`${baseUrl}/organizations`, { credentials: "include" });
 				if (!res.ok) return null;
 				const orgs = (await res.json()) as Array<{ uuid: string }>;
 				return orgs[0]?.uuid ?? null;
 			}, this.baseUrl);
-
 			if (orgResult) {
 				this.organizationId = orgResult;
 				console.log(`[ClaudeWeb] Discovered organization: ${this.organizationId}`);
 			}
 		} catch {
-			// ignore - will try without org ID
+			/* ignore */
 		}
 	}
 
-	async sendMessage(params: {
-		message: string;
-		model?: string;
-		signal?: AbortSignal;
-	}): Promise<ReadableStream<Uint8Array>> {
-		const page = await this.ensurePage();
-
-		const model = params.model || "claude-sonnet-4-20250514";
-		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+	protected async callApi(page: Page, params: NormalizedSendParams): Promise<EvalResult> {
 		const conversationUuid = crypto.randomUUID();
 		const orgId = this.organizationId;
 		const baseUrl = this.baseUrl;
+		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-		// Execute all API calls inside the browser context to bypass Cloudflare
-		const responseData = (await page.evaluate(
+		const evaluatePromise = page.evaluate(
 			async ({
 				baseUrl: apiBase,
 				orgId: org,
@@ -104,40 +83,30 @@ export class ClaudeWebClient implements WebProviderClient {
 				timezone: tz,
 				message: msg,
 			}) => {
-				// Step 1: Create conversation
 				const createUrl = org
 					? `${apiBase}/organizations/${org}/chat_conversations`
 					: `${apiBase}/chat_conversations`;
-
 				const createRes = await fetch(createUrl, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					credentials: "include",
 					body: JSON.stringify({ name: "", uuid: convUuid }),
 				});
-
 				if (!createRes.ok) {
 					const text = await createRes.text();
 					return {
 						ok: false as const,
 						status: createRes.status,
-						error: `Failed to create conversation: ${createRes.status} ${text.slice(0, 500)}`,
+						error: `[create_conversation] ${createRes.status} ${text.slice(0, 500)}`,
 					};
 				}
-
 				const conv = (await createRes.json()) as { uuid: string };
-
-				// Step 2: Send completion
 				const completionUrl = org
 					? `${apiBase}/organizations/${org}/chat_conversations/${conv.uuid}/completion`
 					: `${apiBase}/chat_conversations/${conv.uuid}/completion`;
-
 				const completionRes = await fetch(completionUrl, {
 					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Accept: "text/event-stream",
-					},
+					headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
 					credentials: "include",
 					body: JSON.stringify({
 						prompt: msg,
@@ -153,22 +122,17 @@ export class ClaudeWebClient implements WebProviderClient {
 						tools: [],
 					}),
 				});
-
 				if (!completionRes.ok) {
 					const text = await completionRes.text();
 					return {
 						ok: false as const,
 						status: completionRes.status,
-						error: `Claude API error: ${completionRes.status} ${text.slice(0, 500)}`,
+						error: `[completion] ${completionRes.status} ${text.slice(0, 500)}`,
 					};
 				}
-
-				// Read entire SSE stream in browser context
 				const reader = completionRes.body?.getReader();
-				if (!reader) {
+				if (!reader)
 					return { ok: false as const, status: 500, error: "No response body from Claude API" };
-				}
-
 				const decoder = new TextDecoder();
 				let fullText = "";
 				while (true) {
@@ -176,52 +140,150 @@ export class ClaudeWebClient implements WebProviderClient {
 					if (done) break;
 					fullText += decoder.decode(value, { stream: true });
 				}
-
 				return { ok: true as const, data: fullText };
 			},
 			{
 				baseUrl,
 				orgId: orgId ?? null,
 				conversationUuid,
-				model,
+				model: params.model,
 				timezone,
 				message: params.message,
 			},
-		)) as { ok: true; data: string } | { ok: false; status: number; error: string };
-
-		if (!responseData.ok) {
-			if (responseData.status === 403) {
-				console.log("[ClaudeWeb] 403 from API even via CDP, falling back to DOM simulation");
-				return this.chatCompletionsViaDOM({ message: params.message, signal: params.signal });
-			}
-			if (responseData.status === 401) {
-				throw new Error("Claude authentication failed. Please run `webauth` to refresh.");
-			}
-			throw new Error(responseData.error ?? `Claude API error ${responseData.status}`);
-		}
-
-		console.log(`[ClaudeWeb] Response length: ${responseData.data?.length || 0} bytes`);
-
-		const encoder = new TextEncoder();
-		const data = responseData.data ?? "";
-		return new ReadableStream({
-			start(controller) {
-				controller.enqueue(encoder.encode(data));
-				controller.close();
-			},
-		});
+		);
+		return (await withTimeout(evaluatePromise, SEND_TIMEOUT_MS, "Claude request")) as EvalResult;
 	}
 
 	/**
-	 * DOM-based fallback: type the message into claude.ai's chat input and poll
-	 * for the assistant reply. Used when even browser-context fetch returns 403.
+	 * Custom sendMessage to handle Claude-specific error flows:
+	 * - 401 → SessionExpiredError + auto-refresh retry
+	 * - 403 (rate limit) → clear error
+	 * - 403 (other) → DOM fallback
+	 * - 429 → rate limit error
 	 */
+	override async sendMessage(params: {
+		message: string;
+		model?: string;
+		signal?: AbortSignal;
+	}): Promise<ReadableStream<Uint8Array>> {
+		try {
+			return await this.doSendMessage(params);
+		} catch (err) {
+			if (err instanceof SessionExpiredError) {
+				console.warn("[ClaudeWeb] Session expired, attempting auto-refresh...");
+				const refreshed = await this.refreshSession();
+				if (refreshed) {
+					console.log("[ClaudeWeb] Session refreshed, retrying request...");
+					return this.doSendMessage(params);
+				}
+			}
+			throw err;
+		}
+	}
+
+	private async doSendMessage(params: {
+		message: string;
+		model?: string;
+		signal?: AbortSignal;
+	}): Promise<ReadableStream<Uint8Array>> {
+		const page = await this.getPage();
+		const normalized: NormalizedSendParams = {
+			message: params.message,
+			model: params.model || this.config.defaultModel,
+			signal: params.signal,
+		};
+		const result = await this.callApi(page, normalized);
+		if (!result.ok) {
+			const errBody = result.error ?? "";
+			const errLower = errBody.toLowerCase();
+			console.warn(`[ClaudeWeb] API error ${result.status}: ${errBody.slice(0, 500)}`);
+
+			if (result.status === 401) throw new SessionExpiredError(this.providerId, errBody);
+
+			const errorCode = errBody.match(/"error_code"\s*:\s*"([^"]+)"/)?.[1] ?? "";
+			const errorMessage =
+				errBody.match(/"message"\s*:\s*"([^"]+)"/)?.[1] ?? `Claude API error ${result.status}`;
+
+			if (errorCode === "model_not_available" || /model.*not available/i.test(errLower))
+				throw new Error(errorMessage);
+
+			if (
+				result.status === 429 ||
+				/rate.?limit|out of (free )?messages|usage.?limit|quota|too many|exceeded/i.test(
+					errLower,
+				) ||
+				/limit.*reset|upgrade.*pro/i.test(errLower)
+			) {
+				throw new Error(
+					`Claude rate limit reached (HTTP ${result.status}). Please wait for the limit to reset or upgrade your plan.`,
+				);
+			}
+
+			if (result.status === 403) {
+				const userMessage = ClaudeWebClient.extractLastUserMessage(params.message);
+				console.log(
+					`[ClaudeWeb] 403 (unknown cause), falling back to DOM simulation (${userMessage.length} chars)`,
+				);
+				return this.chatCompletionsViaDOM({ message: userMessage, signal: params.signal });
+			}
+			throw new Error(errorMessage);
+		}
+		console.log(`[ClaudeWeb] Response length: ${result.data?.length || 0} bytes`);
+		return textToStream(result.data ?? "");
+	}
+
+	private static extractLastUserMessage(prompt: string): string {
+		const parts = prompt.split(/\n\nHuman:\s*/);
+		if (parts.length > 1) {
+			const last = parts[parts.length - 1]?.trim();
+			if (last) return last;
+		}
+		return prompt;
+	}
+
+	async checkSession(): Promise<{ valid: boolean; reason?: string }> {
+		try {
+			const page = await this.getPage();
+			const result = await page.evaluate(async (baseUrl: string) => {
+				const res = await fetch(`${baseUrl}/organizations`, { credentials: "include" });
+				return { status: res.status, ok: res.ok };
+			}, this.baseUrl);
+			if (result.ok) return { valid: true };
+			return { valid: false, reason: `Claude API returned ${result.status}` };
+		} catch (err) {
+			return { valid: false, reason: err instanceof Error ? err.message : String(err) };
+		}
+	}
+
+	async refreshSession(): Promise<boolean> {
+		try {
+			this.page = null;
+			await this.getPage();
+			const page = this.page!;
+			await page.goto("https://claude.ai/", { waitUntil: "domcontentloaded", timeout: 15000 });
+			await page.waitForTimeout(2000);
+			const check = await this.checkSession();
+			if (check.valid) {
+				this.organizationId = undefined;
+				await this.onInit();
+				console.log("[ClaudeWeb] Session refresh succeeded");
+				return true;
+			}
+			console.warn(`[ClaudeWeb] Session refresh failed: ${check.reason}`);
+			return false;
+		} catch (err) {
+			console.error(
+				`[ClaudeWeb] Session refresh error: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			return false;
+		}
+	}
+
 	private async chatCompletionsViaDOM(params: {
 		message: string;
 		signal?: AbortSignal;
 	}): Promise<ReadableStream<Uint8Array>> {
-		const page = await this.ensurePage();
-
+		const page = await this.getPage();
 		const inputSelectors = [
 			'div.ProseMirror[contenteditable="true"]',
 			'[contenteditable="true"]',
@@ -232,27 +294,23 @@ export class ClaudeWebClient implements WebProviderClient {
 			inputHandle = await page.$(sel);
 			if (inputHandle) break;
 		}
-		if (!inputHandle) {
+		if (!inputHandle)
 			throw new Error("Claude DOM fallback failed: chat input not found. Is claude.ai loaded?");
-		}
-
 		await inputHandle.click();
 		await page.waitForTimeout(300);
-		await page.keyboard.type(params.message, { delay: 20 });
-		await page.waitForTimeout(500);
+		await pasteText(page, params.message, inputHandle);
 		await page.keyboard.press("Enter");
-		console.log("[ClaudeWeb] DOM: typed message and pressed Enter");
+		console.log(
+			`[ClaudeWeb] DOM: pasted message (${params.message.length} chars) and pressed Enter`,
+		);
 
 		const maxWaitMs = 120000;
 		const pollIntervalMs = 2000;
 		let lastText = "";
 		let stableCount = 0;
-		const signal = params.signal;
-
 		for (let elapsed = 0; elapsed < maxWaitMs; elapsed += pollIntervalMs) {
-			if (signal?.aborted) throw new Error("Claude request cancelled");
+			if (params.signal?.aborted) throw new Error("Claude request cancelled");
 			await new Promise((r) => setTimeout(r, pollIntervalMs));
-
 			const result = await page.evaluate(() => {
 				const clean = (t: string) => t.replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
 				const assistantMessages = document.querySelectorAll(
@@ -268,7 +326,6 @@ export class ClaudeWebClient implements WebProviderClient {
 				);
 				return { text, isStreaming: !!stopBtn };
 			});
-
 			if (result.text && result.text.length >= 20) {
 				if (result.text !== lastText) {
 					lastText = result.text;
@@ -279,46 +336,29 @@ export class ClaudeWebClient implements WebProviderClient {
 				}
 			}
 		}
-
-		if (!lastText) {
+		if (!lastText)
 			throw new Error(
 				"Claude DOM fallback: no assistant reply detected. Ensure claude.ai is open and logged in.",
 			);
-		}
-
-		// Wrap as SSE for stream parser compatibility
-		const fakeSse = `data: ${JSON.stringify({
-			type: "content_block_delta",
-			delta: { text: lastText },
-		})}\n\ndata: [DONE]\n\n`;
-		const encoder = new TextEncoder();
-		return new ReadableStream({
-			start(controller) {
-				controller.enqueue(encoder.encode(fakeSse));
-				controller.close();
-			},
-		});
+		const rateLimitPatterns = [
+			/you['']ve hit your limit/i,
+			/limits will reset/i,
+			/out of free messages/i,
+			/upgrade.*pro/i,
+			/usage limit/i,
+		];
+		if (rateLimitPatterns.some((r) => r.test(lastText)))
+			throw new Error(
+				"Claude rate limit reached. Please wait for the limit to reset or upgrade your plan.",
+			);
+		const fakeSse = `data: ${JSON.stringify({ type: "content_block_delta", delta: { text: lastText } })}\n\ndata: [DONE]\n\n`;
+		return textToStream(fakeSse);
 	}
 
-	async parseStream(
+	protected parseStreamImpl(
 		body: ReadableStream<Uint8Array>,
 		onDelta?: (delta: string) => void,
 	): Promise<StreamResult> {
 		return parseClaudeStream(body, onDelta);
-	}
-
-	listModels(): ModelInfo[] {
-		return [
-			{ id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
-			{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-			{ id: "claude-opus-4-20250514", name: "Claude Opus 4" },
-			{ id: "claude-opus-4-6", name: "Claude Opus 4.6" },
-			{ id: "claude-haiku-4-20250514", name: "Claude Haiku 4" },
-			{ id: "claude-haiku-4-6", name: "Claude Haiku 4.6" },
-		];
-	}
-
-	async close(): Promise<void> {
-		this.page = null;
 	}
 }
