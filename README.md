@@ -193,12 +193,12 @@ The gateway converts OpenAI's structured `tools` definitions into prompt-injecte
 
 ## Platform Compatibility
 
-| Feature                          | macOS | Linux | Windows         |
-| -------------------------------- | ----- | ----- | --------------- |
-| Gateway (`serve`/`start`/`stop`) | ✅    | ✅    | ✅              |
-| `chrome` command                 | ✅    | ✅    | ✅              |
-| `start-chrome-debug.sh`          | ✅    | ✅    | ⚠️ WSL/Git Bash |
-| All providers                    | ✅    | ✅    | ✅              |
+| Feature                          | macOS | Linux | Windows                         |
+| -------------------------------- | ----- | ----- | ------------------------------- |
+| Gateway (`serve`/`start`/`stop`) | ✅    | ✅    | ✅                              |
+| `chrome` command                 | ✅    | ✅    | ✅                              |
+| `start-chrome-debug.sh`          | ✅    | ✅    | ✅ (use `chrome start` instead) |
+| All providers                    | ✅    | ✅    | ✅                              |
 
 ---
 

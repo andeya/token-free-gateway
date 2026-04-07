@@ -1,0 +1,39 @@
+{
+	"name": "token-free-gateway",
+	"version": "0.5.1",
+	"description": "Multi-provider OpenAI-compatible AI gateway powered by web sessions (native binary via optional platform packages)",
+	"author": "andeya <andeyalee@outlook.com>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/andeya/token-free-gateway"
+	},
+	"keywords": [
+		"openai",
+		"gateway",
+		"ai",
+		"llm",
+		"claude",
+		"chatgpt",
+		"deepseek",
+		"gemini",
+		"cli"
+	],
+	"files": [
+		"bin",
+		"README.md"
+	],
+	"bin": {
+		"token-free-gateway": "bin/index.js"
+	},
+	"optionalDependencies": {
+		"@andeya/token-free-gateway-darwin-arm64": "0.5.1",
+		"@andeya/token-free-gateway-darwin-x64": "0.5.1",
+		"@andeya/token-free-gateway-linux-x64": "0.5.1",
+		"@andeya/token-free-gateway-linux-arm64": "0.5.1",
+		"@andeya/token-free-gateway-win32-x64": "0.5.1"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

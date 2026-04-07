@@ -193,12 +193,12 @@ sequenceDiagram
 
 ## 平台兼容性
 
-| 功能                           | macOS | Linux | Windows              |
-| ------------------------------ | ----- | ----- | -------------------- |
-| 网关（`serve`/`start`/`stop`） | ✅    | ✅    | ✅                   |
-| `chrome` 命令                  | ✅    | ✅    | ✅                   |
-| `start-chrome-debug.sh`        | ✅    | ✅    | ⚠️ 需要 WSL/Git Bash |
-| 全部 provider                  | ✅    | ✅    | ✅                   |
+| 功能                           | macOS | Linux | Windows                     |
+| ------------------------------ | ----- | ----- | --------------------------- |
+| 网关（`serve`/`start`/`stop`） | ✅    | ✅    | ✅                          |
+| `chrome` 命令                  | ✅    | ✅    | ✅                          |
+| `start-chrome-debug.sh`        | ✅    | ✅    | ✅（推荐用 `chrome start`） |
+| 全部 provider                  | ✅    | ✅    | ✅                          |
 
 ---
 

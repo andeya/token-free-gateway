@@ -1,6 +1,6 @@
 {
 	"name": "token-free-gateway",
-	"version": "0.5.0",
+	"version": "0.5.1",
 	"description": "Multi-provider OpenAI-compatible AI gateway powered by web sessions",
 	"module": "index.ts",
 	"type": "module",
@@ -15,7 +15,11 @@
 		"format": "bunx @biomejs/biome format --write .",
 		"typecheck": "bunx tsc --noEmit",
 		"webauth": "bun index.ts webauth",
-		"build": "bun build index.ts --compile --external playwright-core --outfile token-free-gateway"
+		"build": "bun build index.ts --compile --external playwright-core --outfile token-free-gateway",
+		"bump": "bun scripts/bump-version.ts",
+		"bump:patch": "bun scripts/bump-version.ts patch",
+		"bump:minor": "bun scripts/bump-version.ts minor",
+		"bump:major": "bun scripts/bump-version.ts major"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "latest",

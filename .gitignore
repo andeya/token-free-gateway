@@ -4,8 +4,12 @@ node_modules
 # output
 out
 dist
+/npm
 *.tgz
-token-free-gateway
+/token-free-gateway
+
+# dev scripts
+generate_git_history.py
 
 # code coverage
 coverage

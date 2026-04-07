@@ -1,0 +1,36 @@
+{
+	"name": "@andeya/token-free-gateway-darwin-x64",
+	"version": "0.5.1",
+	"description": "Prebuilt token-free-gateway binary for macOS (Intel x86_64)",
+	"author": "andeya <andeyalee@outlook.com>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/andeya/token-free-gateway"
+	},
+	"keywords": [
+		"openai",
+		"gateway",
+		"ai",
+		"llm",
+		"claude",
+		"chatgpt",
+		"cli"
+	],
+	"os": [
+		"darwin"
+	],
+	"cpu": [
+		"x64"
+	],
+	"bin": {
+		"token-free-gateway": "bin/token-free-gateway"
+	},
+	"files": [
+		"bin",
+		"README.md"
+	],
+	"publishConfig": {
+		"access": "public"
+	}
+}
