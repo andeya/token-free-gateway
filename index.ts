@@ -1,4 +1,5 @@
 import pkg from "./package.json";
+import { CONFIG_FILE_PATH } from "./src/config.ts";
 
 const VERSION = pkg.version;
 const args = process.argv.slice(2);
@@ -29,7 +30,7 @@ Environment (override config file):
   TFG_API_KEY         Bearer token for client auth (optional, empty = disabled)
   TFG_CDP_URL         Chrome debug port URL (default: http://127.0.0.1:9222)
 
-Config file: ~/.token-free-gateway/config.json (auto-created on first start)
+Config file: ${CONFIG_FILE_PATH} (auto-created on first start)
 
 Quick Start:
   1. Install Chrome (or Chromium) on your machine

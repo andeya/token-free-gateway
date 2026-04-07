@@ -35,7 +35,7 @@ function loadConfigFile(): ConfigFile {
 }
 
 /**
- * Create ~/.token-free-gateway/config.json with default values if it does not exist.
+ * Create <homedir>/.token-free-gateway/config.json with default values if it does not exist.
  * Called once at server startup so users always have a reference file to edit.
  */
 export function ensureConfigFile(): void {
@@ -54,7 +54,7 @@ export function ensureConfigFile(): void {
  *
  * Priority (highest to lowest):
  *   1. TFG_* environment variables
- *   2. ~/.token-free-gateway/config.json
+ *   2. <homedir>/.token-free-gateway/config.json
  *   3. Built-in defaults
  */
 export function loadConfig(): GatewayConfig {

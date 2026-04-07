@@ -1,6 +1,6 @@
 /**
  * Persistent credential store for web AI providers.
- * Stores auth profiles in ~/.token-free-gateway/auth-profiles.json
+ * Stores auth profiles in <homedir>/.token-free-gateway/auth-profiles.json
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
