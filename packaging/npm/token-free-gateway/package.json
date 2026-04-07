@@ -1,6 +1,6 @@
 {
 	"name": "token-free-gateway",
-	"version": "0.5.1",
+	"version": "0.5.2",
 	"description": "Multi-provider OpenAI-compatible AI gateway powered by web sessions (native binary via optional platform packages)",
 	"author": "andeya <andeyalee@outlook.com>",
 	"license": "MIT",
@@ -27,11 +27,11 @@
 		"token-free-gateway": "bin/index.js"
 	},
 	"optionalDependencies": {
-		"@andeya/token-free-gateway-darwin-arm64": "0.5.1",
-		"@andeya/token-free-gateway-darwin-x64": "0.5.1",
-		"@andeya/token-free-gateway-linux-x64": "0.5.1",
-		"@andeya/token-free-gateway-linux-arm64": "0.5.1",
-		"@andeya/token-free-gateway-win32-x64": "0.5.1"
+		"@andeya/token-free-gateway-darwin-arm64": "0.5.2",
+		"@andeya/token-free-gateway-darwin-x64": "0.5.2",
+		"@andeya/token-free-gateway-linux-x64": "0.5.2",
+		"@andeya/token-free-gateway-linux-arm64": "0.5.2",
+		"@andeya/token-free-gateway-win32-x64": "0.5.2"
 	},
 	"publishConfig": {
 		"access": "public"

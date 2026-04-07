@@ -1,6 +1,6 @@
 {
 	"name": "@andeya/token-free-gateway-linux-x64",
-	"version": "0.5.1",
+	"version": "0.5.2",
 	"description": "Prebuilt token-free-gateway binary for Linux (x86_64)",
 	"author": "andeya <andeyalee@outlook.com>",
 	"license": "MIT",

@@ -1,6 +1,6 @@
 {
 	"name": "token-free-gateway",
-	"version": "0.5.1",
+	"version": "0.5.2",
 	"description": "Multi-provider OpenAI-compatible AI gateway powered by web sessions",
 	"module": "index.ts",
 	"type": "module",
