@@ -44,52 +44,51 @@ async function main() {
 	const authorized = listAuthorizedProviders();
 
 	if (authorized.length > 0) {
-		console.log("已授权的 Web 模型 / Authorized providers:");
+		console.log("Authorized providers:");
 		for (const id of authorized) {
 			const def = definitions.find((d) => d.id === id);
-			console.log(`  ✓ ${def?.name || id}`);
+			console.log(`  ✓ ${def?.name ?? id}`);
 		}
 		console.log("");
 	}
 
-	console.log("请选择要授权的 Web 模型 (多个用逗号分隔):");
 	console.log("Select providers to authorize (comma-separated):\n");
 
 	for (let i = 0; i < definitions.length; i++) {
 		const def = definitions[i]!;
-		const isAuth = authorized.includes(def.id);
-		const status = isAuth ? " ✓" : "";
+		const status = authorized.includes(def.id) ? " ✓" : "";
 		console.log(`  ${i + 1}. ${def.name}${status}`);
 	}
 
-	console.log("\n  0. 退出 / Exit");
-	console.log("  a. 授权所有 / Authorize all");
+	console.log("\n  0. Exit");
+	console.log("  a. Authorize all");
 	console.log("");
 
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
-	const input = await question(rl, "请输入选项 / Enter selection: ");
+	const input = await question(rl, "Enter selection: ");
 	rl.close();
 
-	if (input.trim() === "0" || input.trim() === "") {
-		console.log("已退出 / Exited.");
-		return;
+	const trimmed = input.trim();
+	if (trimmed === "0" || trimmed === "") {
+		console.log("Exited.");
+		process.exit(0);
 	}
 
 	const selected =
-		input.trim() === "a"
+		trimmed === "a"
 			? definitions
-			: input
+			: trimmed
 					.split(",")
 					.map((s) => Number.parseInt(s.trim(), 10) - 1)
 					.filter((i) => i >= 0 && i < definitions.length)
 					.map((i) => definitions[i]!);
 
 	if (selected.length === 0) {
-		console.log("未选择任何模型 / No providers selected.");
-		return;
+		console.log("No providers selected.");
+		process.exit(0);
 	}
 
-	console.log(`\n将授权 / Will authorize: ${selected.map((p) => p.name).join(", ")}\n`);
+	console.log(`\nWill authorize: ${selected.map((p) => p.name).join(", ")}\n`);
 
 	for (const provider of selected) {
 		console.log(`\n━━━ ${provider.name} ━━━`);
@@ -97,25 +96,29 @@ async function main() {
 			const credentials = await provider.loginFn({
 				onProgress: (msg) => console.log(`  > ${msg}`),
 				openUrl: async (url) => {
-					console.log(`  > 打开 / Opening: ${url}`);
+					console.log(`  > Opening: ${url}`);
 					return true;
 				},
 			});
 
 			if (credentials && typeof credentials === "object") {
 				saveCredentials(provider.id, credentials);
-				console.log(`  ✓ ${provider.name} 授权成功 / Authorization succeeded!`);
+				console.log(`  ✓ ${provider.name} authorization succeeded!`);
 			}
 		} catch (error) {
 			console.error(
-				`  ✗ ${provider.name} 授权失败 / Authorization failed:`,
+				`  ✗ ${provider.name} authorization failed:`,
 				error instanceof Error ? error.message : error,
 			);
 		}
 	}
 
-	console.log("\n授权完成 / Authorization complete!");
-	console.log("启动网关 / Start the gateway: token-free-gateway start\n");
+	console.log("\nAuthorization complete!");
+	console.log("Start the gateway: token-free-gateway start");
+	console.log(
+		"\nNote: if the process does not exit automatically, press Ctrl+C — credentials are already saved.\n",
+	);
+	process.exit(0);
 }
 
 main().catch(console.error);

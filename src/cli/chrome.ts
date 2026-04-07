@@ -173,7 +173,6 @@ export async function startChrome() {
 
 export async function stopChrome() {
 	if (process.platform === "win32") {
-		// On Windows, use taskkill to find chrome.exe processes using port 9222
 		const result = Bun.spawnSync({
 			cmd: [
 				"powershell",
@@ -189,7 +188,6 @@ export async function stopChrome() {
 			console.log("No Chrome debug instance found on port 9222.");
 		}
 	} else {
-		// macOS / Linux
 		const result = Bun.spawnSync({
 			cmd: ["pkill", "-f", `chrome.*remote-debugging-port=${CDP_PORT}`],
 			stdout: "ignore",
