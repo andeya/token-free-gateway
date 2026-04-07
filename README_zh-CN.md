@@ -29,7 +29,17 @@ Token-Free Gateway 是一个轻量级 OpenAI 兼容 API 网关，将网页端 AI
 
 ### 1. 安装
 
-**下载预编译二进制**（推荐）—— 从 [GitHub Releases](../../releases) 获取：
+**通过 npm**（推荐）：
+
+```bash
+npm install -g token-free-gateway
+# 或免安装直接运行：
+npx token-free-gateway --help
+```
+
+> npm 包在运行时需要 `playwright-core` 支持浏览器类 provider：`npm i -g playwright-core`
+
+**下载预编译二进制** —— 从 [GitHub Releases](../../releases) 获取：
 
 ```bash
 tar xzf token-free-gateway-<platform>.tar.gz
@@ -44,38 +54,32 @@ bun install
 bun run build    # → ./token-free-gateway
 ```
 
-### 2. 启动 Chrome 调试模式
+### 2. 授权平台
+
+运行授权向导，若 Chrome 尚未以调试模式运行，**将自动启动**：
 
 ```bash
-./token-free-gateway chrome
+token-free-gateway webauth
 ```
 
-一个独立的 Chrome 实例会打开，自动加载所有 13 个平台的登录页面。
-
-### 3. 登录并授权
-
-在浏览器标签页中登录你想使用的平台，然后运行授权向导：
-
-```bash
-./token-free-gateway webauth
-```
-
-选择要授权的平台。凭证保存在 `~/.token-free-gateway/auth-profiles.json`。
+Chrome 会打开所有 13 个平台的登录页面。在浏览器中完成登录后，在终端按 **Enter** 继续，然后选择要授权的平台 —— 凭证保存在 `~/.token-free-gateway/auth-profiles.json`。
 
 > **DeepSeek 特殊说明：** 运行 `webauth` 时需要保持 DeepSeek 聊天页面处于打开状态，向导会自动抓取 bearer token。
 >
-> **提示：** 授权完成后如果终端未返回提示符，按 **Ctrl+C** 即可 — 凭证已保存。
+> **提示：** 授权完成后如果终端未返回提示符，按 **Ctrl+C** 即可 —— 凭证已保存。
+>
+> **手动控制 Chrome：** 也可单独使用 `chrome start` / `chrome stop` 命令显式管理 Chrome 调试实例。
 
-### 4. 启动网关
+### 3. 启动网关
 
 ```bash
-./token-free-gateway start      # 后台守护进程
-./token-free-gateway serve      # 前台运行（调试用）
+token-free-gateway start      # 后台守护进程（日志：~/.token-free-gateway/gateway.log）
+token-free-gateway serve      # 前台运行（调试用）
 ```
 
 网关默认监听 `http://localhost:3456`。
 
-### 5. 接入使用
+### 4. 接入使用
 
 ```python
 from openai import OpenAI
@@ -211,19 +215,25 @@ bun run check       # Biome lint + 格式检查
 bun run lint:fix    # 自动修复所有问题
 bun run typecheck   # TypeScript 类型检查
 bun run build       # 编译独立二进制
+bun run bump        # 显示当前版本号
+bun run bump:patch  # 升级补丁版本（x.y.Z），同步所有 package.json
+bun run bump:minor  # 升级次版本（x.Y.0），同步所有 package.json
+bun run bump:major  # 升级主版本（X.0.0），同步所有 package.json
 ```
 
 ---
 
 ## 常见问题
 
-| 问题                    | 解决方案                                           |
-| ----------------------- | -------------------------------------------------- |
-| `/v1/models` 返回空列表 | 执行 `token-free-gateway webauth` 授权平台         |
-| webauth 卡住            | 按 **Ctrl+C** — 凭证已保存                         |
-| Chrome 启动失败         | 检查 9222 端口：`lsof -i:9222`                     |
-| Playwright 报错         | 安装 `playwright-core`：`npm i -g playwright-core` |
-| DeepSeek 认证失败       | 运行 webauth 时保持 DeepSeek 页面打开              |
+| 问题                    | 解决方案                                                         |
+| ----------------------- | ---------------------------------------------------------------- |
+| `/v1/models` 返回空列表 | 执行 `token-free-gateway webauth` 授权平台                       |
+| webauth 卡住            | 按 **Ctrl+C** —— 凭证已保存                                      |
+| Chrome 自动启动失败     | 手动执行 `token-free-gateway chrome start`，再重新运行 `webauth` |
+| 9222 端口被占用         | 检查冲突进程：`lsof -i:9222`                                     |
+| Playwright 报错         | 安装 `playwright-core`：`npm i -g playwright-core`               |
+| DeepSeek 认证失败       | 运行 webauth 时保持 DeepSeek 页面打开                            |
+| 守护进程启动失败        | 查看日志：`~/.token-free-gateway/gateway.log`                    |
 
 ---
 

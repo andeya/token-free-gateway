@@ -1,6 +1,7 @@
 /**
  * Interactive Web Model Auth wizard.
  * Guides users through authenticating with web AI providers via Chrome CDP.
+ * Automatically starts Chrome in debug mode if it is not already running.
  *
  * Usage: bun run webauth
  */
@@ -13,8 +14,31 @@ function question(rl: ReturnType<typeof createInterface>, prompt: string): Promi
 	return new Promise((resolve) => rl.question(prompt, resolve));
 }
 
+async function isChromeReady(): Promise<boolean> {
+	const cdpUrl = process.env.CDP_URL ?? "http://127.0.0.1:9222";
+	try {
+		const res = await fetch(`${cdpUrl}/json/version`);
+		return res.ok;
+	} catch {
+		return false;
+	}
+}
+
 async function main() {
 	console.log("\n🌐 Token-Free Gateway — Web Model Auth\n");
+
+	if (!(await isChromeReady())) {
+		console.log("Chrome debug mode is not running. Starting Chrome automatically...\n");
+		const { startChrome } = await import("./chrome.ts");
+		await startChrome();
+		const rl0 = createInterface({ input: process.stdin, output: process.stdout });
+		await question(
+			rl0,
+			"\nPlease log in to each provider in the browser tabs, then press Enter to continue: ",
+		);
+		rl0.close();
+		console.log("");
+	}
 
 	const definitions = await listProviderDefinitions();
 	const authorized = listAuthorizedProviders();

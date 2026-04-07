@@ -29,7 +29,17 @@ Token-Free Gateway is a lightweight OpenAI-compatible API server that turns web-
 
 ### 1. Install
 
-**Prebuilt binary** (recommended) — download from [GitHub Releases](../../releases):
+**Via npm** (recommended):
+
+```bash
+npm install -g token-free-gateway
+# or run directly without installing:
+npx token-free-gateway --help
+```
+
+> npm packages require `playwright-core` at runtime for browser-based providers: `npm i -g playwright-core`
+
+**Prebuilt binary** — download from [GitHub Releases](../../releases):
 
 ```bash
 tar xzf token-free-gateway-<platform>.tar.gz
@@ -44,38 +54,32 @@ bun install
 bun run build    # → ./token-free-gateway
 ```
 
-### 2. Launch Chrome debug mode
+### 2. Authorize providers
+
+Run the authorization wizard. Chrome will **start automatically** if it is not already running:
 
 ```bash
-./token-free-gateway chrome
+token-free-gateway webauth
 ```
 
-A dedicated Chrome instance opens with login pages for all 13 providers.
-
-### 3. Log in & authorize
-
-Log in to providers in the browser tabs, then run the wizard:
-
-```bash
-./token-free-gateway webauth
-```
-
-Select which providers to authorize. Credentials are saved to `~/.token-free-gateway/auth-profiles.json`.
+Chrome opens with login pages for all 13 providers. Log in to the ones you want, then press **Enter** in the terminal. Select which providers to authorize — credentials are saved to `~/.token-free-gateway/auth-profiles.json`.
 
 > **DeepSeek:** keep the DeepSeek chat page open while running `webauth` — the wizard captures the bearer token from the live session.
 >
 > **Tip:** if the terminal doesn't return after authorization, press **Ctrl+C** — credentials are already saved.
+>
+> **Manual Chrome control:** `chrome start` and `chrome stop` are also available as standalone commands if you need explicit control over the Chrome debug instance.
 
-### 4. Start the gateway
+### 3. Start the gateway
 
 ```bash
-./token-free-gateway start      # background daemon
-./token-free-gateway serve      # foreground (for debugging)
+token-free-gateway start      # background daemon (logs: ~/.token-free-gateway/gateway.log)
+token-free-gateway serve      # foreground (for debugging)
 ```
 
 The gateway listens on `http://localhost:3456`.
 
-### 5. Use it
+### 4. Use it
 
 ```python
 from openai import OpenAI
@@ -211,19 +215,25 @@ bun run check       # Biome lint + format check
 bun run lint:fix    # Auto-fix all issues
 bun run typecheck   # TypeScript check
 bun run build       # Compile standalone binary
+bun run bump        # Show current version
+bun run bump:patch  # Bump patch version (x.y.Z) and sync all package.json files
+bun run bump:minor  # Bump minor version (x.Y.0) and sync all package.json files
+bun run bump:major  # Bump major version (X.0.0) and sync all package.json files
 ```
 
 ---
 
 ## Troubleshooting
 
-| Problem                    | Solution                                                         |
-| -------------------------- | ---------------------------------------------------------------- |
-| `/v1/models` returns empty | Run `token-free-gateway webauth` to authorize providers          |
-| webauth hangs              | Press **Ctrl+C** — credentials are saved                         |
-| Chrome won't start         | Check port 9222: `lsof -i:9222` / `netstat -ano \| findstr 9222` |
-| Playwright errors          | Install `playwright-core`: `npm i -g playwright-core`            |
-| DeepSeek auth fails        | Keep DeepSeek chat page open during `webauth`                    |
+| Problem                         | Solution                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| `/v1/models` returns empty      | Run `token-free-gateway webauth` to authorize providers                   |
+| webauth hangs                   | Press **Ctrl+C** — credentials are saved                                  |
+| Chrome auto-start fails         | Run `token-free-gateway chrome start` manually, then rerun `webauth`      |
+| Chrome port 9222 already in use | Stop conflicting process: `lsof -i:9222` / `netstat -ano \| findstr 9222` |
+| Playwright errors               | Install `playwright-core`: `npm i -g playwright-core`                     |
+| DeepSeek auth fails             | Keep DeepSeek chat page open during `webauth`                             |
+| Daemon not starting             | Check logs: `~/.token-free-gateway/gateway.log`                           |
 
 ---
 

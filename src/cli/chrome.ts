@@ -164,8 +164,7 @@ export async function startChrome() {
 	console.log("  1. Log in to each provider in the browser tabs");
 	console.log("     (all provider pages have been opened automatically)");
 	console.log("  2. Run: token-free-gateway webauth");
-	console.log("  3. Select providers to authorize");
-	console.log("  4. Run: token-free-gateway start");
+	console.log("  3. Run: token-free-gateway start");
 	console.log("");
 	console.log("  To stop Chrome debug mode:");
 	console.log("    token-free-gateway chrome stop");

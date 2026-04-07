@@ -30,9 +30,8 @@ Environment:
   CDP_URL             Chrome debug port URL (default: http://127.0.0.1:9222)
 
 Quick Start:
-  1. token-free-gateway chrome     # Launch Chrome in debug mode
-  2. token-free-gateway webauth    # Log in & authorize providers
-  3. token-free-gateway start      # Start the gateway in background
+  1. token-free-gateway webauth    # Authorize providers (auto-starts Chrome if needed)
+  2. token-free-gateway start      # Start the gateway in background
 `);
 	process.exit(0);
 }
