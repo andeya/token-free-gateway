@@ -24,14 +24,17 @@ Options:
   --help, -h          Show this help message
   --version, -v       Show version
 
-Environment:
-  PORT                Server port (default: 3456)
-  GATEWAY_API_KEY     API key for client authentication (optional)
-  CDP_URL             Chrome debug port URL (default: http://127.0.0.1:9222)
+Environment (override config file):
+  TFG_PORT            Server port (default: 3456)
+  TFG_API_KEY         Bearer token for client auth (optional, empty = disabled)
+  TFG_CDP_URL         Chrome debug port URL (default: http://127.0.0.1:9222)
+
+Config file: ~/.token-free-gateway/config.json (auto-created on first start)
 
 Quick Start:
-  1. token-free-gateway webauth    # Authorize providers (auto-starts Chrome if needed)
-  2. token-free-gateway start      # Start the gateway in background
+  1. Install Chrome (or Chromium) on your machine
+  2. token-free-gateway webauth    # Authorize providers (auto-starts Chrome)
+  3. token-free-gateway start      # Start the gateway in background
 `);
 	process.exit(0);
 }
