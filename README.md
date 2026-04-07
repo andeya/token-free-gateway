@@ -142,29 +142,68 @@ Options:
 
 ## Configuration
 
-| Variable          | Default                 | Description                                   |
-| ----------------- | ----------------------- | --------------------------------------------- |
-| `PORT`            | `3456`                  | Server port                                   |
-| `GATEWAY_API_KEY` | _(empty)_               | Bearer token for client auth; empty = no auth |
-| `CDP_URL`         | `http://127.0.0.1:9222` | Chrome DevTools Protocol endpoint             |
+Two ways to configure the gateway — pick whichever fits your workflow:
 
-Create a `.env` file next to the binary:
+```
+TFG_* environment variables  ← highest priority
+        ↓ fall through if not set
+~/.token-free-gateway/config.json
+        ↓ fall through if not set
+built-in defaults             ← lowest priority
+```
+
+### Option A — config file (recommended)
+
+On **first start** the gateway automatically creates `~/.token-free-gateway/config.json` with all defaults filled in:
+
+```json
+{
+  "port": 3456,
+  "apiKey": "",
+  "cdpUrl": "http://127.0.0.1:9222"
+}
+```
+
+Edit the fields you want to change and leave the rest as-is.
+
+| Field    | Default                 | Description                                   |
+| -------- | ----------------------- | --------------------------------------------- |
+| `port`   | `3456`                  | Server listen port                            |
+| `apiKey` | `""` (disabled)         | Bearer token for client auth; empty = no auth |
+| `cdpUrl` | `http://127.0.0.1:9222` | Chrome DevTools Protocol endpoint             |
+
+### Option B — environment variables
+
+All variables use the `TFG_` prefix to avoid conflicts with other software.
+
+| Variable      | Default                 | Description                                   |
+| ------------- | ----------------------- | --------------------------------------------- |
+| `TFG_PORT`    | `3456`                  | Server listen port                            |
+| `TFG_API_KEY` | `""` (disabled)         | Bearer token for client auth; empty = no auth |
+| `TFG_CDP_URL` | `http://127.0.0.1:9222` | Chrome DevTools Protocol endpoint             |
+
+You can also put them in a `.env` file next to the binary — Bun loads it automatically:
 
 ```bash
-PORT=3456
-GATEWAY_API_KEY=my-secret-key
+TFG_PORT=3456
+TFG_API_KEY=my-secret-key
+TFG_CDP_URL=http://127.0.0.1:9222
 ```
+
+> **Note:** environment variables always win over `config.json`, so you can use the file for defaults and override individual values per-session with env vars.
 
 ---
 
 ## API Endpoints
 
-| Method | Path                   | Description                                  |
-| ------ | ---------------------- | -------------------------------------------- |
-| `POST` | `/v1/chat/completions` | Chat completions (streaming + non-streaming) |
-| `GET`  | `/v1/models`           | List models from authorized providers        |
-| `GET`  | `/v1/models/:id`       | Get model details                            |
-| `GET`  | `/health`              | Health check (includes browser CDP status)   |
+| Method | Path                   | Auth     | Description                                  |
+| ------ | ---------------------- | -------- | -------------------------------------------- |
+| `POST` | `/v1/chat/completions` | Required | Chat completions (streaming + non-streaming) |
+| `GET`  | `/v1/models`           | Required | List models from authorized providers        |
+| `GET`  | `/v1/models/:id`       | Required | Get model details                            |
+| `GET`  | `/health`              | Public   | Health check (includes browser CDP status)   |
+
+> "Required" means the `Authorization: Bearer <TFG_API_KEY>` header is checked **only** when `TFG_API_KEY` is configured. If unset, all endpoints are open.
 
 ---
 
