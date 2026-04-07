@@ -4,6 +4,8 @@
  * and chrome.ts — only the essentials needed for webauth flows.
  */
 
+import { loadConfig } from "../config.ts";
+
 /**
  * Build HTTP headers, injecting Basic auth when URL contains credentials.
  */
@@ -60,8 +62,9 @@ export async function getChromeWebSocketUrl(
 }
 
 /**
- * Get the default CDP URL from environment or fallback.
+ * Get the configured CDP URL.
+ * Honors the full priority chain: TFG_CDP_URL env → config.json → default.
  */
 export function getDefaultCdpUrl(): string {
-	return process.env.CDP_URL || "http://127.0.0.1:9222";
+	return loadConfig().cdpUrl;
 }
