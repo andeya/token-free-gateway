@@ -207,27 +207,30 @@ TFG_* 环境变量          ← 最高优先级
 {
   "port": 3456,
   "apiKey": "",
-  "cdpUrl": "http://127.0.0.1:9222"
+  "cdpUrl": "http://127.0.0.1:9222",
+  "requestTimeoutSec": 300
 }
 ```
 
 按需修改对应字段，未改动的字段保持默认值即可。
 
-| 字段     | 默认值                  | 说明                                    |
-| -------- | ----------------------- | --------------------------------------- |
-| `port`   | `3456`                  | 监听端口                                |
-| `apiKey` | `""`（禁用）            | 客户端鉴权 Bearer Token；为空则关闭鉴权 |
-| `cdpUrl` | `http://127.0.0.1:9222` | Chrome 远程调试协议地址                 |
+| 字段                | 默认值                  | 说明                                          |
+| ------------------- | ----------------------- | --------------------------------------------- |
+| `port`              | `3456`                  | 监听端口                                      |
+| `apiKey`            | `""`（禁用）            | 客户端鉴权 Bearer Token；为空则关闭鉴权       |
+| `cdpUrl`            | `http://127.0.0.1:9222` | Chrome 远程调试协议地址                       |
+| `requestTimeoutSec` | `300`                   | `/v1/chat/completions` 单次请求超时时间（秒） |
 
 ### 方式二 — 环境变量
 
 所有变量统一使用 `TFG_` 前缀，避免与其他软件冲突。
 
-| 环境变量      | 默认值                  | 说明                                    |
-| ------------- | ----------------------- | --------------------------------------- |
-| `TFG_PORT`    | `3456`                  | 监听端口                                |
-| `TFG_API_KEY` | `""`（禁用）            | 客户端鉴权 Bearer Token；为空则关闭鉴权 |
-| `TFG_CDP_URL` | `http://127.0.0.1:9222` | Chrome 远程调试协议地址                 |
+| 环境变量                  | 默认值                  | 说明                                          |
+| ------------------------- | ----------------------- | --------------------------------------------- |
+| `TFG_PORT`                | `3456`                  | 监听端口                                      |
+| `TFG_API_KEY`             | `""`（禁用）            | 客户端鉴权 Bearer Token；为空则关闭鉴权       |
+| `TFG_CDP_URL`             | `http://127.0.0.1:9222` | Chrome 远程调试协议地址                       |
+| `TFG_REQUEST_TIMEOUT_SEC` | `300`                   | `/v1/chat/completions` 单次请求超时时间（秒） |
 
 也可以在二进制同目录放一个 `.env` 文件，Bun 会自动加载：
 
@@ -235,6 +238,7 @@ TFG_* 环境变量          ← 最高优先级
 TFG_PORT=3456
 TFG_API_KEY=my-secret-key
 TFG_CDP_URL=http://127.0.0.1:9222
+TFG_REQUEST_TIMEOUT_SEC=300
 ```
 
 > **说明：** 环境变量的优先级始终高于 `config.json`。可以用配置文件保存持久设置，再通过环境变量临时覆盖单个字段。
@@ -243,12 +247,12 @@ TFG_CDP_URL=http://127.0.0.1:9222
 
 ## API 端点
 
-| 方法   | 路径                   | 鉴权   | 说明                          |
-| ------ | ---------------------- | ------ | ----------------------------- |
-| `POST` | `/v1/chat/completions` | 需鉴权 | 对话补全（支持流式与非流式）  |
-| `GET`  | `/v1/models`           | 需鉴权 | 列出已授权平台的模型          |
-| `GET`  | `/v1/models/:id`       | 需鉴权 | 查询模型详情                  |
-| `GET`  | `/health`              | 公开   | 健康检查（含浏览器 CDP 状态） |
+| 方法   | 路径                   | 鉴权   | 说明                              |
+| ------ | ---------------------- | ------ | --------------------------------- |
+| `POST` | `/v1/chat/completions` | 需鉴权 | 对话补全（支持流式与非流式）      |
+| `GET`  | `/v1/models`           | 需鉴权 | 列出已授权平台的模型              |
+| `GET`  | `/v1/models/:id`       | 需鉴权 | 查询模型详情                      |
+| `GET`  | `/health`              | 公开   | 健康检查（浏览器 CDP + 会话状态） |
 
 > "需鉴权"表示**仅当**配置了 `TFG_API_KEY` 时才校验 `Authorization: Bearer` 头。未配置则所有接口公开。
 
@@ -320,15 +324,17 @@ bun run bump:major  # 升级主版本（X.0.0），同步所有 package.json
 
 ## 常见问题
 
-| 问题                      | 解决方案                                                         |
-| ------------------------- | ---------------------------------------------------------------- |
-| `/v1/models` 返回空列表   | 执行 `token-free-gateway webauth` 授权平台                       |
-| `/health` 返回 `degraded` | Chrome 不可达，执行 `token-free-gateway chrome start`            |
-| webauth 卡住              | 按 **Ctrl+C** —— 凭证已保存                                      |
-| Chrome 自动启动失败       | 手动执行 `token-free-gateway chrome start`，再重新运行 `webauth` |
-| 9222 端口被占用           | 检查冲突进程：`lsof -i:9222` / `netstat -ano \| findstr 9222`    |
-| DeepSeek 认证失败         | 运行 webauth 时保持 DeepSeek 页面打开                            |
-| 守护进程启动失败          | 查看日志：`~/.token-free-gateway/gateway.log`                    |
+| 问题                             | 解决方案                                                         |
+| -------------------------------- | ---------------------------------------------------------------- |
+| `/v1/models` 返回空列表          | 执行 `token-free-gateway webauth` 授权平台                       |
+| `/health` 返回 `degraded`        | Chrome 不可达，执行 `token-free-gateway chrome start`            |
+| webauth 卡住                     | 按 **Ctrl+C** —— 凭证已保存                                      |
+| Chrome 自动启动失败              | 手动执行 `token-free-gateway chrome start`，再重新运行 `webauth` |
+| 9222 端口被占用                  | 检查冲突进程：`lsof -i:9222` / `netstat -ano \| findstr 9222`    |
+| DeepSeek 认证失败                | 运行 webauth 时保持 DeepSeek 页面打开                            |
+| 守护进程启动失败                 | 查看日志：`~/.token-free-gateway/gateway.log`                    |
+| 请求挂起 / 504 超时              | 增大 `requestTimeoutSec` 或检查上游会话状态                      |
+| `/health` 返回 `session_expired` | 平台会话已过期，执行 `token-free-gateway webauth` 重新授权       |
 
 ---
 

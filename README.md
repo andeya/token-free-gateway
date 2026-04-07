@@ -207,27 +207,30 @@ On **first start** the gateway automatically creates `~/.token-free-gateway/conf
 {
   "port": 3456,
   "apiKey": "",
-  "cdpUrl": "http://127.0.0.1:9222"
+  "cdpUrl": "http://127.0.0.1:9222",
+  "requestTimeoutSec": 300
 }
 ```
 
 Edit the fields you want to change and leave the rest as-is.
 
-| Field    | Default                 | Description                                   |
-| -------- | ----------------------- | --------------------------------------------- |
-| `port`   | `3456`                  | Server listen port                            |
-| `apiKey` | `""` (disabled)         | Bearer token for client auth; empty = no auth |
-| `cdpUrl` | `http://127.0.0.1:9222` | Chrome DevTools Protocol endpoint             |
+| Field               | Default                 | Description                                              |
+| ------------------- | ----------------------- | -------------------------------------------------------- |
+| `port`              | `3456`                  | Server listen port                                       |
+| `apiKey`            | `""` (disabled)         | Bearer token for client auth; empty = no auth            |
+| `cdpUrl`            | `http://127.0.0.1:9222` | Chrome DevTools Protocol endpoint                        |
+| `requestTimeoutSec` | `300`                   | Per-request timeout (seconds) for `/v1/chat/completions` |
 
 ### Option B — environment variables
 
 All variables use the `TFG_` prefix to avoid conflicts with other software.
 
-| Variable      | Default                 | Description                                   |
-| ------------- | ----------------------- | --------------------------------------------- |
-| `TFG_PORT`    | `3456`                  | Server listen port                            |
-| `TFG_API_KEY` | `""` (disabled)         | Bearer token for client auth; empty = no auth |
-| `TFG_CDP_URL` | `http://127.0.0.1:9222` | Chrome DevTools Protocol endpoint             |
+| Variable                  | Default                 | Description                                              |
+| ------------------------- | ----------------------- | -------------------------------------------------------- |
+| `TFG_PORT`                | `3456`                  | Server listen port                                       |
+| `TFG_API_KEY`             | `""` (disabled)         | Bearer token for client auth; empty = no auth            |
+| `TFG_CDP_URL`             | `http://127.0.0.1:9222` | Chrome DevTools Protocol endpoint                        |
+| `TFG_REQUEST_TIMEOUT_SEC` | `300`                   | Per-request timeout (seconds) for `/v1/chat/completions` |
 
 You can also put them in a `.env` file next to the binary — Bun loads it automatically:
 
@@ -235,6 +238,7 @@ You can also put them in a `.env` file next to the binary — Bun loads it autom
 TFG_PORT=3456
 TFG_API_KEY=my-secret-key
 TFG_CDP_URL=http://127.0.0.1:9222
+TFG_REQUEST_TIMEOUT_SEC=300
 ```
 
 > **Note:** environment variables always win over `config.json`, so you can use the file for defaults and override individual values per-session with env vars.
@@ -248,7 +252,7 @@ TFG_CDP_URL=http://127.0.0.1:9222
 | `POST` | `/v1/chat/completions` | Required | Chat completions (streaming + non-streaming) |
 | `GET`  | `/v1/models`           | Required | List models from authorized providers        |
 | `GET`  | `/v1/models/:id`       | Required | Get model details                            |
-| `GET`  | `/health`              | Public   | Health check (includes browser CDP status)   |
+| `GET`  | `/health`              | Public   | Health check (browser CDP + session status)  |
 
 > "Required" means the `Authorization: Bearer <TFG_API_KEY>` header is checked **only** when `TFG_API_KEY` is configured. If unset, all endpoints are open.
 
@@ -320,15 +324,17 @@ bun run bump:major  # Bump major version (X.0.0) and sync all package.json files
 
 ## Troubleshooting
 
-| Problem                         | Solution                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| `/v1/models` returns empty      | Run `token-free-gateway webauth` to authorize providers                   |
-| `/health` returns `degraded`    | Chrome is not reachable — run `token-free-gateway chrome start`           |
-| webauth hangs                   | Press **Ctrl+C** — credentials are saved                                  |
-| Chrome auto-start fails         | Run `token-free-gateway chrome start` manually, then rerun `webauth`      |
-| Chrome port 9222 already in use | Stop conflicting process: `lsof -i:9222` / `netstat -ano \| findstr 9222` |
-| DeepSeek auth fails             | Keep DeepSeek chat page open during `webauth`                             |
-| Daemon not starting             | Check logs: `~/.token-free-gateway/gateway.log`                           |
+| Problem                             | Solution                                                                    |
+| ----------------------------------- | --------------------------------------------------------------------------- |
+| `/v1/models` returns empty          | Run `token-free-gateway webauth` to authorize providers                     |
+| `/health` returns `degraded`        | Chrome is not reachable — run `token-free-gateway chrome start`             |
+| webauth hangs                       | Press **Ctrl+C** — credentials are saved                                    |
+| Chrome auto-start fails             | Run `token-free-gateway chrome start` manually, then rerun `webauth`        |
+| Chrome port 9222 already in use     | Stop conflicting process: `lsof -i:9222` / `netstat -ano \| findstr 9222`   |
+| DeepSeek auth fails                 | Keep DeepSeek chat page open during `webauth`                               |
+| Daemon not starting                 | Check logs: `~/.token-free-gateway/gateway.log`                             |
+| Request hangs / 504 timeout         | Increase `requestTimeoutSec` or check upstream session health               |
+| `/health` returns `session_expired` | Provider session expired — run `token-free-gateway webauth` to re-authorize |
 
 ---
 
