@@ -247,7 +247,9 @@ function jsonError(message: string, status: number): Response {
 function providerErrorResponse(err: unknown, context: string): Response {
 	if (err instanceof SessionExpiredError) {
 		evictProviderClient(err.providerId);
-		console.error(`[chat-completions] ${context}: session expired for "${err.providerId}". Run 'token-free-gateway webauth'.`);
+		console.error(
+			`[chat-completions] ${context}: session expired for "${err.providerId}". Run 'token-free-gateway webauth'.`,
+		);
 		return jsonError(err.message, 401);
 	}
 	if (err instanceof ProviderApiError) {

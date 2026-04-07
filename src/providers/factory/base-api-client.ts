@@ -2,10 +2,10 @@ import type { Page } from "playwright-core";
 import type { BrowserCookie } from "../shared/cookie-parser.ts";
 import { throwIfSessionExpired } from "../shared/error-guard.ts";
 import type { EvalResult } from "../shared/eval-helpers.ts";
-import { ProviderApiError } from "../types.ts";
 import { ensurePage } from "../shared/page-lifecycle.ts";
 import { textToStream } from "../shared/stream-helpers.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
+import { ProviderApiError } from "../types.ts";
 import type { ApiClientConfig, NormalizedSendParams } from "./types.ts";
 
 /**
