@@ -1,50 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { ChatCompletionRequest, ChatCompletionResponse } from "../src/openai/types.ts";
 import { parseClaudeStream } from "../src/providers/claude/stream.ts";
-
-let server: ReturnType<typeof Bun.serve>;
-const PORT = 19876;
-
-beforeAll(async () => {
-	server = Bun.serve({
-		port: PORT,
-		fetch(req) {
-			const url = new URL(req.url);
-
-			if (url.pathname.includes("/organizations")) {
-				return Response.json([{ uuid: "org-test-123" }]);
-			}
-
-			if (url.pathname.includes("/chat_conversations") && !url.pathname.includes("/completion")) {
-				return Response.json({ uuid: "conv-test-123" });
-			}
-
-			if (url.pathname.includes("/completion")) {
-				const encoder = new TextEncoder();
-				const stream = new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							encoder.encode(
-								'data: {"type":"content_block_delta","delta":{"text":"Hello from Claude!"}}\n\n',
-							),
-						);
-						controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-						controller.close();
-					},
-				});
-				return new Response(stream, {
-					headers: { "Content-Type": "text/event-stream" },
-				});
-			}
-
-			return new Response("Not found", { status: 404 });
-		},
-	});
-});
-
-afterAll(() => {
-	server.stop();
-});
 
 function createMockClient(responseText: string) {
 	return {
