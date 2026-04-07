@@ -140,6 +140,8 @@ curl http://localhost:3456/v1/chat/completions \
   -d '{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hello!"}]}'
 ```
 
+> If you have set `TFG_API_KEY`, add `-H "Authorization: Bearer <your-key>"` to every request (except `/health`).
+
 ---
 
 ## Supported Providers

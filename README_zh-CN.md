@@ -140,6 +140,8 @@ curl http://localhost:3456/v1/chat/completions \
   -d '{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"你好！"}]}'
 ```
 
+> 若配置了 `TFG_API_KEY`，需在每个请求中添加 `-H "Authorization: Bearer <your-key>"`（`/health` 除外）。
+
 ---
 
 ## 支持的平台
@@ -324,7 +326,7 @@ bun run bump:major  # 升级主版本（X.0.0），同步所有 package.json
 | `/health` 返回 `degraded` | Chrome 不可达，执行 `token-free-gateway chrome start`            |
 | webauth 卡住              | 按 **Ctrl+C** —— 凭证已保存                                      |
 | Chrome 自动启动失败       | 手动执行 `token-free-gateway chrome start`，再重新运行 `webauth` |
-| 9222 端口被占用           | 检查冲突进程：`lsof -i:9222`                                     |
+| 9222 端口被占用           | 检查冲突进程：`lsof -i:9222` / `netstat -ano \| findstr 9222`    |
 | DeepSeek 认证失败         | 运行 webauth 时保持 DeepSeek 页面打开                            |
 | 守护进程启动失败          | 查看日志：`~/.token-free-gateway/gateway.log`                    |
 
