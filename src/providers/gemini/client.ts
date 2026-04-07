@@ -1,6 +1,9 @@
 import type { Page } from "playwright-core";
-import { BrowserManager } from "../../browser/manager.ts";
-import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
+import { pasteText } from "../../browser/dom-input.ts";
+import { BaseDomClient } from "../factory/base-dom-client.ts";
+import type { DomClientConfig, NormalizedSendParams } from "../factory/types.ts";
+import { parseCookieHeader } from "../shared/cookie-parser.ts";
+import type { StreamResult } from "../types.ts";
 import type { GeminiWebAuth } from "./auth.ts";
 import { parseGeminiStream } from "./stream.ts";
 
@@ -8,49 +11,27 @@ function delay(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
 }
 
-export class GeminiWebClient implements WebProviderClient {
+export class GeminiWebClient extends BaseDomClient<GeminiWebAuth> {
 	readonly providerId = "gemini-web";
-	private options: GeminiWebAuth;
-	private page: Page | null = null;
-	private initialized = false;
 
-	constructor(options: GeminiWebAuth) {
-		this.options = options;
+	protected readonly config: DomClientConfig = {
+		hostKey: "gemini.google.com",
+		startUrl: "https://gemini.google.com/app",
+		cookieDomain: ".google.com",
+		models: [
+			{ id: "gemini-pro", name: "Gemini Pro (Web)" },
+			{ id: "gemini-ultra", name: "Gemini Ultra (Web)" },
+		],
+		pollIntervalMs: 2000,
+		maxWaitMs: 120_000,
+		stabilityThreshold: 2,
+	};
+
+	protected getCookies() {
+		return parseCookieHeader(this.auth.cookie, this.config.cookieDomain);
 	}
 
-	private parseCookies(): Array<{ name: string; value: string; domain: string; path: string }> {
-		return this.options.cookie
-			.split(";")
-			.filter((c) => c.trim().includes("="))
-			.map((cookie) => {
-				const [name, ...valueParts] = cookie.trim().split("=");
-				return {
-					name: name?.trim() ?? "",
-					value: valueParts.join("=").trim(),
-					domain: ".google.com",
-					path: "/",
-				};
-			})
-			.filter((c) => c.name.length > 0);
-	}
-
-	async init(): Promise<void> {
-		if (this.initialized) return;
-
-		const bm = BrowserManager.getInstance();
-		this.page = await bm.getPage("gemini.google.com", "https://gemini.google.com/app");
-		await bm.addCookies(this.parseCookies());
-
-		this.initialized = true;
-	}
-
-	private async chatCompletionsViaDOM(params: {
-		message: string;
-		signal?: AbortSignal;
-	}): Promise<ReadableStream<Uint8Array>> {
-		if (!this.page) throw new Error("GeminiWebClient not initialized");
-
-		const page = this.page;
+	protected async sendViaDom(page: Page, params: NormalizedSendParams): Promise<string> {
 		const inputSelectors = [
 			'textarea[placeholder*="Gemini"]',
 			'textarea[placeholder*="问问"]',
@@ -64,33 +45,18 @@ export class GeminiWebClient implements WebProviderClient {
 			inputHandle = await page.$(sel);
 			if (inputHandle) break;
 		}
-		if (!inputHandle) {
-			throw new Error("Gemini: could not find chat input");
-		}
+		if (!inputHandle) throw new Error("Gemini: could not find chat input");
 
 		await inputHandle.click();
 		await delay(300);
-		await page.keyboard.type(params.message, { delay: 20 });
+		await pasteText(page, params.message, inputHandle);
 		await delay(300);
 		await page.keyboard.press("Enter");
 
-		const maxWaitMs = 120000;
-		const pollIntervalMs = 2000;
-		let lastText = "";
-		let stableCount = 0;
-		const signal = params.signal;
-
-		for (let elapsed = 0; elapsed < maxWaitMs; elapsed += pollIntervalMs) {
-			if (signal?.aborted) throw new Error("Gemini request aborted");
-
-			await delay(pollIntervalMs);
-
-			const result = await this.page.evaluate(() => {
+		return this.pollForStableText(async () => {
+			const result = await page.evaluate(() => {
 				const clean = (t: string) => t.replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
-				const getText = (el: Element): string => {
-					const raw = (el as HTMLElement).innerText ?? "";
-					return clean(raw);
-				};
+				const getText = (el: Element): string => clean((el as HTMLElement).innerText ?? "");
 
 				const sidebarRoot = document.querySelector('[aria-label*="对话"], [class*="sidebar"], nav');
 				const inputEl = document.querySelector(
@@ -100,7 +66,6 @@ export class GeminiWebClient implements WebProviderClient {
 					inputEl?.closest("form") ??
 					inputEl?.closest("[class*='input']") ??
 					inputEl?.parentElement?.parentElement;
-
 				const isExcluded = (el: Element) => sidebarRoot?.contains(el) || inputRoot?.contains(el);
 
 				const noisePatterns = [
@@ -128,7 +93,6 @@ export class GeminiWebClient implements WebProviderClient {
 					t.length < 20 ||
 					noisePatterns.some((p) => t.includes(p)) ||
 					/^(你好|需要我|sage)/i.test(t);
-
 				const stripTrailingUI = (t: string) =>
 					t
 						.replace(
@@ -143,7 +107,6 @@ export class GeminiWebClient implements WebProviderClient {
 					document.querySelector('[class*="chat"]') ??
 					document.body;
 				const scoped = main === document.body ? document : main;
-
 				let text = "";
 
 				const modelSelectors = [
@@ -156,7 +119,6 @@ export class GeminiWebClient implements WebProviderClient {
 					'[class*="response-content"] [class*="markdown"]',
 					'[class*="response-content"]',
 				];
-
 				for (const sel of modelSelectors) {
 					const els = scoped.querySelectorAll(sel);
 					for (let i = els.length - 1; i >= 0; i--) {
@@ -170,10 +132,8 @@ export class GeminiWebClient implements WebProviderClient {
 					}
 					if (text) break;
 				}
-
 				if (!text) {
-					const fallbackSelectors = ['[class*="markdown"]', "article"];
-					for (const sel of fallbackSelectors) {
+					for (const sel of ['[class*="markdown"]', "article"]) {
 						const els = scoped.querySelectorAll(sel);
 						for (let i = els.length - 1; i >= 0; i--) {
 							const el = els[i]!;
@@ -187,70 +147,20 @@ export class GeminiWebClient implements WebProviderClient {
 						if (text) break;
 					}
 				}
-
-				const stopBtn = document.querySelector(
-					'[aria-label*="Stop"], [aria-label*="stop"], [aria-label*="停止"]',
-				);
-				const isStreaming = !!stopBtn;
-				return { text, isStreaming };
+				return text;
 			});
-
-			const minLen = 40;
-			if (result.text && result.text.length >= minLen) {
-				if (result.text !== lastText) {
-					lastText = result.text;
-					stableCount = 0;
-				} else {
-					stableCount++;
-					if (!result.isStreaming && stableCount >= 2) break;
-				}
-			}
-		}
-
-		if (!lastText) {
-			throw new Error(
-				"Gemini: no assistant reply detected. Open gemini.google.com, sign in, and ensure the chat input is visible.",
-			);
-		}
-
-		const sseLine = `data: ${JSON.stringify({ text: lastText })}\n`;
-		const encoder = new TextEncoder();
-		return new ReadableStream<Uint8Array>({
-			start(controller) {
-				controller.enqueue(encoder.encode(sseLine));
-				controller.close();
-			},
-		});
+			return result;
+		}, params.signal);
 	}
 
-	async sendMessage(params: {
-		message: string;
-		model?: string;
-		signal?: AbortSignal;
-	}): Promise<ReadableStream<Uint8Array>> {
-		if (!this.page) throw new Error("GeminiWebClient not initialized");
-		return this.chatCompletionsViaDOM({
-			message: params.message,
-			signal: params.signal,
-		});
+	protected override formatSsePayload(text: string): string {
+		return `data: ${JSON.stringify({ text })}\n`;
 	}
 
-	async parseStream(
+	protected parseStreamImpl(
 		body: ReadableStream<Uint8Array>,
 		onDelta?: (delta: string) => void,
 	): Promise<StreamResult> {
 		return parseGeminiStream(body, onDelta);
-	}
-
-	listModels(): ModelInfo[] {
-		return [
-			{ id: "gemini-pro", name: "Gemini Pro (Web)" },
-			{ id: "gemini-ultra", name: "Gemini Ultra (Web)" },
-		];
-	}
-
-	async close(): Promise<void> {
-		this.page = null;
-		this.initialized = false;
 	}
 }

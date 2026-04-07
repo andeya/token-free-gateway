@@ -1,96 +1,75 @@
 import type { Page } from "playwright-core";
 import { BrowserManager } from "../../browser/manager.ts";
-import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
+import { BaseApiClient } from "../factory/base-api-client.ts";
+import type { ApiClientConfig, NormalizedSendParams } from "../factory/types.ts";
+import { type BrowserCookie, parseCookieHeader } from "../shared/cookie-parser.ts";
+import type { EvalResult } from "../shared/eval-helpers.ts";
+import type { StreamResult } from "../types.ts";
 import type { KimiWebAuth } from "./auth.ts";
 import { parseKimiStream } from "./stream.ts";
 
-export class KimiWebClient implements WebProviderClient {
+export class KimiWebClient extends BaseApiClient<KimiWebAuth> {
 	readonly providerId = "kimi-web";
-	private cookie: string;
-	private accessToken: string;
-	private baseUrl = "https://www.kimi.com";
-	private page: Page | null = null;
 
-	constructor(auth: KimiWebAuth) {
-		this.cookie = auth.cookie || "";
-		this.accessToken = auth.accessToken || "";
+	protected readonly config: ApiClientConfig = {
+		hostKey: "kimi.com",
+		startUrl: "https://www.kimi.com/",
+		cookieDomain: ".kimi.com",
+		defaultModel: "moonshot-v1-32k",
+		models: [
+			{ id: "moonshot-v1-8k", name: "Moonshot v1 8K" },
+			{ id: "moonshot-v1-32k", name: "Moonshot v1 32K" },
+			{ id: "moonshot-v1-128k", name: "Moonshot v1 128K" },
+		],
+	};
+
+	private readonly baseUrl = "https://www.kimi.com";
+
+	protected getCookies(): BrowserCookie[] {
+		return [];
 	}
 
-	private async ensurePage(): Promise<Page> {
+	/** Custom page init: dynamic domain for cookies + secure flag for __Secure-/__Host- prefixed cookies. */
+	protected override async getPage(): Promise<Page> {
 		if (this.page) {
 			try {
 				await this.page.evaluate(() => document.readyState);
+				return this.page;
 			} catch {
 				this.page = null;
 			}
 		}
-
-		if (this.page) {
-			return this.page;
-		}
-
 		const bm = BrowserManager.getInstance();
-		this.page = await bm.getPage("kimi.com", "https://www.kimi.com/");
-
-		if (this.cookie.trim()) {
+		this.page = await bm.getPage(this.config.hostKey, this.config.startUrl);
+		const cookie = this.auth.cookie || "";
+		if (cookie.trim()) {
 			const pageUrl = this.page.url() ?? this.baseUrl;
 			const domain = pageUrl.includes("moonshot.cn") ? ".moonshot.cn" : ".kimi.com";
-
-			const rawCookies = this.cookie.split(";").map((c) => {
-				const [name, ...valueParts] = c.trim().split("=");
-				const nameStr = name?.trim() ?? "";
-				const valueStr = valueParts.join("=").trim();
-				if (!nameStr) {
-					return null;
-				}
-				const cookie: {
-					name: string;
-					value: string;
-					domain: string;
-					path: string;
-					secure?: boolean;
-				} = {
-					name: nameStr,
-					value: valueStr,
-					domain,
-					path: "/",
-				};
-				if (nameStr.startsWith("__Secure-") || nameStr.startsWith("__Host-")) {
-					cookie.secure = true;
-				}
-				return cookie;
-			});
-			const cookies = rawCookies.filter((c): c is NonNullable<typeof c> => c !== null);
-			if (cookies.length > 0) {
-				await bm.addCookies(cookies);
-			}
+			const cookies = parseCookieHeader(cookie, domain).map((c) => ({
+				...c,
+				...(c.name.startsWith("__Secure-") || c.name.startsWith("__Host-") ? { secure: true } : {}),
+			}));
+			if (cookies.length > 0) await bm.addCookies(cookies);
 		}
-
 		return this.page;
 	}
 
-	async init(): Promise<void> {
-		await this.ensurePage();
-	}
-
-	async sendMessage(params: {
-		message: string;
-		model?: string;
-		signal?: AbortSignal;
-	}): Promise<ReadableStream<Uint8Array>> {
-		const page = await this.ensurePage();
+	protected async callApi(page: Page, params: NormalizedSendParams): Promise<EvalResult> {
 		const bm = BrowserManager.getInstance();
 		const ctx = await bm.getContext();
 		const cookies = await ctx.cookies([this.baseUrl]);
 		const kimiAuthCookie = cookies.find((c) => c.name === "kimi-auth")?.value;
-		const authToken = this.accessToken || kimiAuthCookie;
+		const authToken = this.auth.accessToken || kimiAuthCookie;
 		if (!authToken) {
-			throw new Error(
-				"Kimi: no credentials (accessToken or kimi-auth cookie). Run webauth to refresh login.",
-			);
+			return {
+				ok: false,
+				status: 401,
+				error:
+					"Kimi: no credentials (accessToken or kimi-auth cookie). Run webauth to refresh login.",
+			};
 		}
 
-		const model = params.model || "moonshot-v1-32k";
+		const model = params.model;
 		const result = await page.evaluate(
 			async ({
 				baseUrl,
@@ -133,10 +112,9 @@ export class KimiWebClient implements WebProviderClient {
 					},
 					body: buf,
 				});
-
 				if (!res.ok) {
 					const text = await res.text();
-					return { ok: false as const, error: text.slice(0, 400) };
+					return { ok: false as const, status: res.status, error: text.slice(0, 400) };
 				}
 				const arr = await res.arrayBuffer();
 				const u8 = new Uint8Array(arr);
@@ -144,37 +122,29 @@ export class KimiWebClient implements WebProviderClient {
 				let o = 0;
 				while (o + 5 <= u8.length) {
 					const len = new DataView(u8.buffer, u8.byteOffset + o + 1, 4).getUint32(0, false);
-					if (o + 5 + len > u8.length) {
-						break;
-					}
+					if (o + 5 + len > u8.length) break;
 					const chunk = u8.slice(o + 5, o + 5 + len);
 					try {
 						const obj = JSON.parse(new TextDecoder().decode(chunk));
-						if (obj.error) {
+						if (obj.error)
 							return {
 								ok: false as const,
 								error:
 									obj.error.message || obj.error.code || JSON.stringify(obj.error).slice(0, 200),
 							};
-						}
 						const op = obj.op || "";
-						if (obj.block?.text?.content && (op === "append" || op === "set")) {
+						if (obj.block?.text?.content && (op === "append" || op === "set"))
 							texts.push(obj.block.text.content);
-						} else if (obj.text?.content && (op === "append" || op === "set")) {
+						else if (obj.text?.content && (op === "append" || op === "set"))
 							texts.push(obj.text.content);
-						}
 						if (!op && obj.message?.role === "assistant" && obj.message?.blocks) {
 							for (const blk of obj.message.blocks) {
-								if (blk.text?.content) {
-									texts.push(blk.text.content);
-								}
+								if (blk.text?.content) texts.push(blk.text.content);
 							}
 						}
-						if (obj.done) {
-							break;
-						}
+						if (obj.done) break;
 					} catch {
-						// ignore
+						/* ignore */
 					}
 					o += 5 + len;
 				}
@@ -195,36 +165,20 @@ export class KimiWebClient implements WebProviderClient {
 		);
 
 		if (!result.ok) {
-			throw new Error(`Kimi API error: ${result.error}`);
+			return {
+				ok: false,
+				status: ("status" in result ? result.status : 0) as number,
+				error: ("error" in result ? result.error : "Unknown error") as string,
+			};
 		}
-
 		const escaped = JSON.stringify(result.text);
-		const sse = `data: {"text":${escaped}}\n\ndata: [DONE]\n\n`;
-		const encoder = new TextEncoder();
-		return new ReadableStream({
-			start(controller) {
-				controller.enqueue(encoder.encode(sse));
-				controller.close();
-			},
-		});
+		return { ok: true, data: `data: {"text":${escaped}}\n\ndata: [DONE]\n\n` };
 	}
 
-	async parseStream(
+	protected parseStreamImpl(
 		body: ReadableStream<Uint8Array>,
 		onDelta?: (delta: string) => void,
 	): Promise<StreamResult> {
 		return parseKimiStream(body, onDelta);
-	}
-
-	listModels(): ModelInfo[] {
-		return [
-			{ id: "moonshot-v1-8k", name: "Moonshot v1 8K" },
-			{ id: "moonshot-v1-32k", name: "Moonshot v1 32K" },
-			{ id: "moonshot-v1-128k", name: "Moonshot v1 128K" },
-		];
-	}
-
-	async close(): Promise<void> {
-		this.page = null;
 	}
 }

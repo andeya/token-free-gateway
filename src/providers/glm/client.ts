@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import type { Page } from "playwright-core";
-import { BrowserManager } from "../../browser/manager.ts";
-import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
+import { BaseApiClient } from "../factory/base-api-client.ts";
+import type { ApiClientConfig, NormalizedSendParams } from "../factory/types.ts";
+import { parseCookieHeader } from "../shared/cookie-parser.ts";
+import type { EvalResult } from "../shared/eval-helpers.ts";
+import { withEvalTimeout } from "../shared/eval-helpers.ts";
+import type { StreamResult } from "../types.ts";
 import type { GlmWebAuth } from "./auth.ts";
 import { parseGlmStream } from "./stream.ts";
 
@@ -12,7 +16,6 @@ const ASSISTANT_ID_MAP: Record<string, string> = {
 	"glm-4-zero": "676411c38945bbc58a905d31",
 };
 const DEFAULT_ASSISTANT_ID = "65940acff94777010aa6b796";
-
 const SIGN_SECRET = "8a1317a7468aa3ad86e997d08f3f31cb";
 
 const X_EXP_GROUPS =
@@ -42,58 +45,34 @@ function generateSign(): { timestamp: string; nonce: string; sign: string } {
 	return { timestamp, nonce, sign };
 }
 
-export class GlmWebClient implements WebProviderClient {
+export class GlmWebClient extends BaseApiClient<GlmWebAuth> {
 	readonly providerId = "glm-web";
-	private options: GlmWebAuth;
-	private page: Page | null = null;
-	private initialized = false;
+
+	protected readonly config: ApiClientConfig = {
+		hostKey: "chatglm.cn",
+		startUrl: "https://chatglm.cn",
+		cookieDomain: ".chatglm.cn",
+		defaultModel: "glm-4-plus",
+		models: [{ id: "glm-4-plus", name: "GLM-4 Plus" }],
+	};
+
 	private accessToken: string | null = null;
 	private deviceId = crypto.randomUUID().replace(/-/g, "");
 
-	constructor(auth: GlmWebAuth) {
-		this.options = auth;
-	}
-
-	private parseCookies(): Array<{ name: string; value: string; domain: string; path: string }> {
-		return this.options.cookie
-			.split(";")
-			.filter((c) => c.trim().includes("="))
-			.map((cookie) => {
-				const [name, ...valueParts] = cookie.trim().split("=");
-				return {
-					name: name?.trim() ?? "",
-					value: valueParts.join("=").trim(),
-					domain: ".chatglm.cn",
-					path: "/",
-				};
-			})
-			.filter((c) => c.name.length > 0);
+	protected getCookies() {
+		return parseCookieHeader(this.auth.cookie, this.config.cookieDomain);
 	}
 
 	private getRefreshToken(): string | null {
-		const cookies = this.parseCookies();
-		const refreshCookie = cookies.find((c) => c.name === "chatglm_refresh_token");
-		return refreshCookie?.value ?? null;
+		return this.getCookies().find((c) => c.name === "chatglm_refresh_token")?.value ?? null;
 	}
 
 	private getAccessTokenFromCookie(): string | null {
-		const cookies = this.parseCookies();
-		const tokenCookie = cookies.find((c) => c.name === "chatglm_token");
-		return tokenCookie?.value ?? null;
+		return this.getCookies().find((c) => c.name === "chatglm_token")?.value ?? null;
 	}
 
-	async init(): Promise<void> {
-		if (this.initialized) {
-			return;
-		}
-
-		const bm = BrowserManager.getInstance();
-		this.page = await bm.getPage("chatglm.cn", "https://chatglm.cn");
-		await bm.addCookies(this.parseCookies());
-
+	protected override async onInit(): Promise<void> {
 		await this.refreshAccessToken();
-
-		this.initialized = true;
 	}
 
 	private async refreshAccessToken(): Promise<void> {
@@ -102,25 +81,8 @@ export class GlmWebClient implements WebProviderClient {
 			this.accessToken = cookieToken;
 			return;
 		}
-
-		try {
-			const bm = BrowserManager.getInstance();
-			const ctx = await bm.getContext();
-			const browserCookies = await ctx.cookies(["https://chatglm.cn"]);
-			const browserToken = browserCookies.find((c) => c.name === "chatglm_token");
-			if (browserToken?.value) {
-				this.accessToken = browserToken.value;
-				return;
-			}
-		} catch {
-			// ignore
-		}
-
 		const refreshToken = this.getRefreshToken();
-		if (!refreshToken || !this.page) {
-			return;
-		}
-
+		if (!refreshToken || !this.page) return;
 		const sign = generateSign();
 		const requestId = crypto.randomUUID().replace(/-/g, "");
 		const result = await this.page.evaluate(
@@ -143,24 +105,19 @@ export class GlmWebClient implements WebProviderClient {
 						credentials: "include",
 						body: JSON.stringify({}),
 					});
-
-					if (!res.ok) {
-						return { ok: false, status: res.status, error: await res.text() };
-					}
-
+					if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
 					const data = (await res.json()) as {
 						result?: { access_token?: string; accessToken?: string };
 						accessToken?: string;
 					};
 					const accessToken =
 						data.result?.access_token ?? data.result?.accessToken ?? data.accessToken;
-					if (!accessToken) {
+					if (!accessToken)
 						return {
 							ok: false,
 							status: 200,
 							error: `No accessToken in response: ${JSON.stringify(data).substring(0, 300)}`,
 						};
-					}
 					return { ok: true, accessToken };
 				} catch (err) {
 					return { ok: false, status: 500, error: String(err) };
@@ -168,7 +125,6 @@ export class GlmWebClient implements WebProviderClient {
 			},
 			{ refreshToken, deviceId: this.deviceId, requestId, sign },
 		);
-
 		if (result.ok && result.accessToken) {
 			this.accessToken = result.accessToken;
 		} else {
@@ -176,26 +132,12 @@ export class GlmWebClient implements WebProviderClient {
 		}
 	}
 
-	async sendMessage(params: {
-		message: string;
-		model?: string;
-		signal?: AbortSignal;
-	}): Promise<ReadableStream<Uint8Array>> {
-		if (!this.page) {
-			throw new Error("GlmWebClient not initialized");
-		}
-
-		if (!this.accessToken) {
-			await this.refreshAccessToken();
-		}
-
-		const model = params.model || "glm-4-plus";
-		const assistantId = ASSISTANT_ID_MAP[model] ?? DEFAULT_ASSISTANT_ID;
-
+	protected async callApi(page: Page, params: NormalizedSendParams): Promise<EvalResult> {
+		if (!this.accessToken) await this.refreshAccessToken();
+		const assistantId = ASSISTANT_ID_MAP[params.model] ?? DEFAULT_ASSISTANT_ID;
 		const fetchTimeoutMs = 120_000;
 		const sign = generateSign();
 		const requestId = crypto.randomUUID().replace(/-/g, "");
-
 		const body = {
 			assistant_id: assistantId,
 			conversation_id: "",
@@ -212,21 +154,14 @@ export class GlmWebClient implements WebProviderClient {
 				quote_log_id: "",
 				platform: "pc",
 			},
-			messages: [
-				{
-					role: "user",
-					content: [{ type: "text", text: params.message }],
-				},
-			],
+			messages: [{ role: "user", content: [{ type: "text", text: params.message }] }],
 		};
-
-		const evalPromise = this.page.evaluate(
+		const evalPromise = page.evaluate(
 			async ({ accessToken, bodyStr, deviceId, requestId, timeoutMs, sign, xExpGroups }) => {
 				let timer: ReturnType<typeof setTimeout> | undefined;
 				try {
 					const controller = new AbortController();
 					timer = setTimeout(() => controller.abort(), timeoutMs);
-
 					const headers: Record<string, string> = {
 						"Content-Type": "application/json",
 						Accept: "text/event-stream",
@@ -245,10 +180,7 @@ export class GlmWebClient implements WebProviderClient {
 						"X-Sign": sign.sign,
 						"X-Timestamp": sign.timestamp,
 					};
-					if (accessToken) {
-						headers.Authorization = `Bearer ${accessToken}`;
-					}
-
+					if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 					const res = await fetch("https://chatglm.cn/chatglm/backend-api/assistant/stream", {
 						method: "POST",
 						headers,
@@ -256,46 +188,30 @@ export class GlmWebClient implements WebProviderClient {
 						body: bodyStr,
 						signal: controller.signal,
 					});
-
 					clearTimeout(timer);
-
 					if (!res.ok) {
 						const errorText = await res.text();
 						return { ok: false, status: res.status, error: errorText.substring(0, 500) };
 					}
-
 					const reader = res.body?.getReader();
-					if (!reader) {
-						return { ok: false, status: 500, error: "No response body" };
-					}
-
+					if (!reader) return { ok: false, status: 500, error: "No response body" };
 					const decoder = new TextDecoder();
 					let fullText = "";
-					let chunkCount = 0;
-
 					while (true) {
 						const { done, value } = await reader.read();
-						if (done) {
-							break;
-						}
-						const chunk = decoder.decode(value, { stream: true });
-						fullText += chunk;
-						chunkCount++;
+						if (done) break;
+						fullText += decoder.decode(value, { stream: true });
 					}
-
-					return { ok: true, data: fullText, chunkCount };
+					return { ok: true, data: fullText };
 				} catch (err) {
-					if (timer) {
-						clearTimeout(timer);
-					}
+					if (timer) clearTimeout(timer);
 					const msg = String(err);
-					if (msg.includes("aborted") || msg.includes("signal")) {
+					if (msg.includes("aborted") || msg.includes("signal"))
 						return {
 							ok: false,
 							status: 408,
 							error: `ChatGLM API request timed out after ${timeoutMs}ms`,
 						};
-					}
 					return { ok: false, status: 500, error: msg };
 				}
 			},
@@ -309,54 +225,22 @@ export class GlmWebClient implements WebProviderClient {
 				xExpGroups: X_EXP_GROUPS,
 			},
 		);
-
-		const externalTimeoutMs = fetchTimeoutMs + 10_000;
-		const responseData = await Promise.race([
-			evalPromise,
-			new Promise<never>((_, reject) =>
-				setTimeout(
-					() =>
-						reject(
-							new Error(`[GlmWeb] page.evaluate timed out after ${externalTimeoutMs / 1000}s`),
-						),
-					externalTimeoutMs,
-				),
-			),
-		]);
-
-		if (!responseData?.ok) {
-			if (responseData?.status === 401) {
-				await this.refreshAccessToken();
-				throw new Error("Authentication expired. Token has been refreshed, please retry.");
-			}
-			throw new Error(
-				`ChatGLM API error: ${responseData?.status || "unknown"} - ${responseData?.error || "Request failed"}`,
-			);
+		const responseData = await withEvalTimeout(evalPromise, fetchTimeoutMs + 10_000, "GLM");
+		if (!responseData?.ok && responseData?.status === 401) {
+			await this.refreshAccessToken();
 		}
-
-		const encoder = new TextEncoder();
-		return new ReadableStream({
-			start(controller) {
-				controller.enqueue(encoder.encode(responseData.data));
-				controller.close();
-			},
-		});
+		return responseData as EvalResult;
 	}
 
-	async parseStream(
+	protected parseStreamImpl(
 		body: ReadableStream<Uint8Array>,
 		onDelta?: (delta: string) => void,
 	): Promise<StreamResult> {
 		return parseGlmStream(body, onDelta);
 	}
 
-	listModels(): ModelInfo[] {
-		return [{ id: "glm-4-plus", name: "GLM-4 Plus" }];
-	}
-
-	async close(): Promise<void> {
+	override async close(): Promise<void> {
 		this.page = null;
-		this.initialized = false;
 		this.accessToken = null;
 	}
 }

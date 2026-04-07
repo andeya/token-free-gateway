@@ -1,6 +1,10 @@
 import type { Page } from "playwright-core";
 import { type BrowserCookie, BrowserManager } from "../../browser/manager.ts";
-import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
+import { BaseApiClient } from "../factory/base-api-client.ts";
+import type { ApiClientConfig, NormalizedSendParams } from "../factory/types.ts";
+import { parseCookieHeader } from "../shared/cookie-parser.ts";
+import type { EvalResult } from "../shared/eval-helpers.ts";
+import type { StreamResult } from "../types.ts";
 import type { DoubaoWebAuth } from "./auth.ts";
 import { parseDoubaoStream } from "./stream.ts";
 
@@ -32,22 +36,34 @@ interface DoubaoMessage {
 
 const DOUBAO_API_BASE = "https://www.doubao.com";
 
-export class DoubaoWebClient implements WebProviderClient {
+export class DoubaoWebClient extends BaseApiClient<DoubaoWebAuth> {
 	readonly providerId = "doubao-web";
-	private auth: DoubaoWebAuth;
-	private config: DoubaoWebClientConfig;
-	private page: Page | null = null;
 
-	constructor(auth: DoubaoWebAuth | string, config: DoubaoWebClientConfig = {}) {
-		if (typeof auth === "string") {
-			try {
-				this.auth = JSON.parse(auth) as DoubaoWebAuth;
-			} catch {
-				this.auth = { sessionid: auth, userAgent: "" };
-			}
-		} else {
-			this.auth = auth;
-		}
+	protected readonly config: ApiClientConfig = {
+		hostKey: "doubao.com",
+		startUrl: "https://www.doubao.com/chat/",
+		cookieDomain: ".doubao.com",
+		defaultModel: "doubao-seed-2.0",
+		models: [
+			{ id: "doubao-seed-2.0", name: "Doubao Seed 2.0 (Web)" },
+			{ id: "doubao-pro", name: "Doubao Pro (Web)" },
+		],
+	};
+
+	private doubaoConfig: DoubaoWebClientConfig;
+
+	constructor(auth: DoubaoWebAuth | string, extraConfig: DoubaoWebClientConfig = {}) {
+		const parsed: DoubaoWebAuth =
+			typeof auth === "string"
+				? (() => {
+						try {
+							return JSON.parse(auth);
+						} catch {
+							return { sessionid: auth, userAgent: "" };
+						}
+					})()
+				: auth;
+		super(parsed);
 
 		const dynamic: Partial<DoubaoWebClientConfig> = {};
 		const a = this.auth as DoubaoWebAuth & Record<string, string | undefined>;
@@ -66,8 +82,7 @@ export class DoubaoWebClient implements WebProviderClient {
 		] as const) {
 			if (a[k]) (dynamic as Record<string, string>)[k] = a[k] as string;
 		}
-
-		this.config = {
+		this.doubaoConfig = {
 			aid: "497858",
 			device_platform: "web",
 			language: "zh",
@@ -79,11 +94,16 @@ export class DoubaoWebClient implements WebProviderClient {
 			use_olympus_account: "1",
 			version_code: "20800",
 			...dynamic,
-			...config,
+			...extraConfig,
 		};
 	}
 
-	private async ensurePage(): Promise<Page> {
+	protected getCookies(): BrowserCookie[] {
+		return [];
+	}
+
+	/** Custom page bootstrapping: Doubao uses either a cookie header string OR sessionid/ttwid objects. */
+	protected override async getPage(): Promise<Page> {
 		if (this.page) {
 			try {
 				await this.page.evaluate(() => document.readyState);
@@ -93,60 +113,36 @@ export class DoubaoWebClient implements WebProviderClient {
 			}
 		}
 		const bm = BrowserManager.getInstance();
-		this.page = await bm.getPage("doubao.com", "https://www.doubao.com/chat/");
+		this.page = await bm.getPage(this.config.hostKey, this.config.startUrl);
 
 		const cookieHeader = this.auth.cookie;
 		if (cookieHeader?.trim() && !cookieHeader.startsWith("{")) {
-			const cookies = cookieHeader
-				.split(";")
-				.map((c) => {
-					const [name, ...valueParts] = c.trim().split("=");
-					return {
-						name: name?.trim() ?? "",
-						value: valueParts.join("=").trim(),
-						domain: ".doubao.com",
-						path: "/",
-					};
-				})
-				.filter((c) => c.name.length > 0);
-			await bm.addCookies(cookies);
+			await bm.addCookies(parseCookieHeader(cookieHeader, this.config.cookieDomain));
 		} else {
-			const sessionId = this.auth.sessionid;
-			const ttwid = this.auth.ttwid ? decodeURIComponent(this.auth.ttwid) : undefined;
 			const toAdd: BrowserCookie[] = [
-				{ name: "sessionid", value: sessionId, domain: ".doubao.com", path: "/" },
+				{
+					name: "sessionid",
+					value: this.auth.sessionid,
+					domain: this.config.cookieDomain,
+					path: "/",
+				},
 			];
-			if (ttwid) toAdd.push({ name: "ttwid", value: ttwid, domain: ".doubao.com", path: "/" });
+			if (this.auth.ttwid) {
+				toAdd.push({
+					name: "ttwid",
+					value: decodeURIComponent(this.auth.ttwid),
+					domain: this.config.cookieDomain,
+					path: "/",
+				});
+			}
 			await bm.addCookies(toAdd);
 		}
-
 		return this.page;
 	}
 
-	private buildQueryParams(): string {
-		const params = new URLSearchParams();
-		for (const [key, value] of Object.entries(this.config)) {
-			if (value !== undefined && value !== null && key !== "msToken" && key !== "a_bogus") {
-				params.append(key, String(value));
-			}
-		}
-		if (this.config.msToken) params.append("msToken", this.config.msToken);
-		if (this.config.a_bogus) params.append("a_bogus", this.config.a_bogus);
-		return params.toString();
-	}
-
-	private mergeMessagesForSamantha(messages: DoubaoMessage[]): string {
-		return `${messages
-			.map((m) => {
-				const role = m.role === "user" ? "user" : m.role === "assistant" ? "assistant" : "system";
-				return `<|im_start|>${role}\n${m.content}\n`;
-			})
-			.join("")}<|redacted_im_end|>\n`;
-	}
-
-	async init(): Promise<void> {
+	protected override async onInit(): Promise<void> {
 		try {
-			const page = await this.ensurePage();
+			const page = await this.getPage();
 			const queryParams = this.buildQueryParams();
 			const probeUrl = `${DOUBAO_API_BASE}/im/conversation/info?${queryParams}`;
 			await page.evaluate(
@@ -165,16 +161,11 @@ export class DoubaoWebClient implements WebProviderClient {
 				{ url: probeUrl },
 			);
 		} catch {
-			// session probe is best-effort
+			/* session probe is best-effort */
 		}
 	}
 
-	async sendMessage(params: {
-		message: string;
-		model?: string;
-		signal?: AbortSignal;
-	}): Promise<ReadableStream<Uint8Array>> {
-		const page = await this.ensurePage();
+	protected async callApi(page: Page, params: NormalizedSendParams): Promise<EvalResult> {
 		const queryParams = this.buildQueryParams();
 		const url = `${DOUBAO_API_BASE}/samantha/chat/completion?${queryParams}`;
 		const text = this.mergeMessagesForSamantha([{ role: "user", content: params.message }]);
@@ -202,7 +193,7 @@ export class DoubaoWebClient implements WebProviderClient {
 			local_message_id: crypto.randomUUID(),
 		});
 
-		const responseData = (await page.evaluate(
+		return (await page.evaluate(
 			async ({ postUrl, bodyJson }: { postUrl: string; bodyJson: string }) => {
 				const res = await fetch(postUrl, {
 					method: "POST",
@@ -216,7 +207,6 @@ export class DoubaoWebClient implements WebProviderClient {
 					body: bodyJson,
 					credentials: "include",
 				});
-
 				if (!res.ok) {
 					const errText = await res.text().catch(() => "");
 					return {
@@ -225,12 +215,9 @@ export class DoubaoWebClient implements WebProviderClient {
 						error: `Doubao API error: ${res.status} ${errText.slice(0, 500)}`,
 					};
 				}
-
 				const reader = res.body?.getReader();
-				if (!reader) {
+				if (!reader)
 					return { ok: false as const, status: 500, error: "No response body from Doubao API" };
-				}
-
 				const decoder = new TextDecoder();
 				let fullText = "";
 				while (true) {
@@ -238,41 +225,37 @@ export class DoubaoWebClient implements WebProviderClient {
 					if (done) break;
 					fullText += decoder.decode(value, { stream: true });
 				}
-
 				return { ok: true as const, data: fullText };
 			},
 			{ postUrl: url, bodyJson: body },
-		)) as { ok: true; data: string } | { ok: false; status: number; error: string };
-
-		if (!responseData.ok) {
-			throw new Error(responseData.error);
-		}
-
-		const encoder = new TextEncoder();
-		const data = responseData.data ?? "";
-		return new ReadableStream({
-			start(controller) {
-				controller.enqueue(encoder.encode(data));
-				controller.close();
-			},
-		});
+		)) as EvalResult;
 	}
 
-	async parseStream(
+	protected parseStreamImpl(
 		body: ReadableStream<Uint8Array>,
 		onDelta?: (delta: string) => void,
 	): Promise<StreamResult> {
 		return parseDoubaoStream(body, onDelta);
 	}
 
-	listModels(): ModelInfo[] {
-		return [
-			{ id: "doubao-seed-2.0", name: "Doubao Seed 2.0 (Web)" },
-			{ id: "doubao-pro", name: "Doubao Pro (Web)" },
-		];
+	private buildQueryParams(): string {
+		const params = new URLSearchParams();
+		for (const [key, value] of Object.entries(this.doubaoConfig)) {
+			if (value !== undefined && value !== null && key !== "msToken" && key !== "a_bogus") {
+				params.append(key, String(value));
+			}
+		}
+		if (this.doubaoConfig.msToken) params.append("msToken", this.doubaoConfig.msToken);
+		if (this.doubaoConfig.a_bogus) params.append("a_bogus", this.doubaoConfig.a_bogus);
+		return params.toString();
 	}
 
-	async close(): Promise<void> {
-		this.page = null;
+	private mergeMessagesForSamantha(messages: DoubaoMessage[]): string {
+		return `${messages
+			.map((m) => {
+				const role = m.role === "user" ? "user" : m.role === "assistant" ? "assistant" : "system";
+				return `<|im_start|>${role}\n${m.content}\n`;
+			})
+			.join("")}<|redacted_im_end|>\n`;
 	}
 }

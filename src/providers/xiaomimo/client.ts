@@ -1,84 +1,67 @@
 import type { Page } from "playwright-core";
-import { BrowserManager } from "../../browser/manager.ts";
-import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
+import { BaseApiClient } from "../factory/base-api-client.ts";
+import type { ApiClientConfig, NormalizedSendParams } from "../factory/types.ts";
+import { parseCookieHeader } from "../shared/cookie-parser.ts";
+import type { EvalResult } from "../shared/eval-helpers.ts";
+import type { StreamResult } from "../types.ts";
 import type { XiaomiMimoWebAuth } from "./auth.ts";
 import { parseXiaomiMimoStream } from "./stream.ts";
 
 const XIAOMIMO_BASE_URL = "https://aistudio.xiaomimimo.com";
 
-export class XiaomiMimoWebClient implements WebProviderClient {
+function randomHex32(): string {
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export class XiaomiMimoWebClient extends BaseApiClient<XiaomiMimoWebAuth> {
 	readonly providerId = "xiaomimo-web";
-	private cookie: string;
-	private userAgent: string;
+
+	protected readonly config: ApiClientConfig = {
+		hostKey: "xiaomimimo.com",
+		startUrl: "https://aistudio.xiaomimimo.com",
+		cookieDomain: ".xiaomimimo.com",
+		defaultModel: "xiaomimo-chat",
+		models: [{ id: "xiaomimo-chat", name: "MiMo Chat" }],
+	};
+
 	private serviceToken: string;
 	private botPh: string;
-	private page: Page | null = null;
 
 	constructor(auth: XiaomiMimoWebAuth) {
-		this.cookie = auth.cookie;
-		this.userAgent =
-			auth.userAgent ||
-			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
-		const serviceTokenMatch = this.cookie.match(/serviceToken="([^"]*)"/);
+		super(auth);
+		const serviceTokenMatch = auth.cookie.match(/serviceToken="?([^;"\s]+)/);
 		this.serviceToken = serviceTokenMatch?.[1] || "";
-		const botPhMatch = this.cookie.match(/xiaomichatbot_ph="([^"]*)"/);
+		const botPhMatch = auth.cookie.match(/xiaomichatbot_ph="?([^;"\s]+)/);
 		this.botPh = botPhMatch?.[1] || "";
 	}
 
-	private async ensurePage(): Promise<Page> {
-		if (this.page) {
-			try {
-				await this.page.evaluate(() => document.readyState);
-				return this.page;
-			} catch {
-				this.page = null;
-			}
-		}
-
-		const bm = BrowserManager.getInstance();
-		this.page = await bm.getPage("xiaomimimo.com", "https://aistudio.xiaomimimo.com");
-
-		const cookieStr = typeof this.cookie === "string" ? this.cookie.trim() : "";
-		if (cookieStr && !cookieStr.startsWith("{")) {
-			const rawCookies = cookieStr.split(";").map((c) => {
-				const [name, ...valueParts] = c.trim().split("=");
-				return {
-					name: name?.trim() ?? "",
-					value: valueParts.join("=").trim(),
-					domain: ".xiaomimimo.com",
-					path: "/",
-				};
-			});
-			const cookies = rawCookies.filter((c) => c.name.length > 0);
-			if (cookies.length > 0) {
-				await bm.addCookies(cookies);
-			}
-		}
-
-		return this.page;
+	protected getCookies() {
+		return parseCookieHeader(this.auth.cookie, this.config.cookieDomain);
 	}
 
-	async init(): Promise<void> {
-		await this.ensurePage();
-	}
-
-	async sendMessage(params: {
-		message: string;
-		model?: string;
-		signal?: AbortSignal;
-	}): Promise<ReadableStream<Uint8Array>> {
-		if (params.signal?.aborted) {
-			throw new Error("XiaomiMimo request cancelled");
-		}
-
-		const page = await this.ensurePage();
-
+	protected async callApi(page: Page, params: NormalizedSendParams): Promise<EvalResult> {
 		let url = `${XIAOMIMO_BASE_URL}/open-apis/bot/chat`;
 		if (this.botPh) {
 			url += `?xiaomichatbot_ph=${encodeURIComponent(this.botPh)}`;
 		}
 
-		const responseData = (await page.evaluate(
+		const requestBody = {
+			msgId: randomHex32(),
+			conversationId: randomHex32(),
+			query: params.message,
+			modelConfig: {
+				enableThinking: false,
+				temperature: 0.8,
+				topP: 0.95,
+				webSearchStatus: "disabled",
+				model: "mimo-v2-flash-studio",
+			},
+			multiMedias: [],
+		};
+
+		return (await page.evaluate(
 			async (args: {
 				requestUrl: string;
 				cookie: string;
@@ -100,14 +83,12 @@ export class XiaomiMimoWebClient implements WebProviderClient {
 					"x-timezone": "Asia/Shanghai",
 					bot_ph: botPh,
 				};
-
 				const res = await fetch(requestUrl, {
 					method: "POST",
 					headers,
 					body: bodyJson,
 					credentials: "include",
 				});
-
 				const text = await res.text();
 				if (!res.ok) {
 					return {
@@ -120,41 +101,20 @@ export class XiaomiMimoWebClient implements WebProviderClient {
 			},
 			{
 				requestUrl: url,
-				cookie: this.cookie,
-				userAgent: this.userAgent,
+				cookie: this.auth.cookie,
+				userAgent: this.auth.userAgent || "Mozilla/5.0",
 				serviceToken: this.serviceToken,
 				botPh: this.botPh,
 				baseUrl: XIAOMIMO_BASE_URL,
-				bodyJson: JSON.stringify({ message: params.message }),
+				bodyJson: JSON.stringify(requestBody),
 			},
-		)) as { ok: true; data: string } | { ok: false; status: number; error: string };
-
-		if (!responseData.ok) {
-			throw new Error(responseData.error);
-		}
-
-		const encoder = new TextEncoder();
-		const data = responseData.data ?? "";
-		return new ReadableStream({
-			start(controller) {
-				controller.enqueue(encoder.encode(data));
-				controller.close();
-			},
-		});
+		)) as EvalResult;
 	}
 
-	async parseStream(
+	protected parseStreamImpl(
 		body: ReadableStream<Uint8Array>,
 		onDelta?: (delta: string) => void,
 	): Promise<StreamResult> {
 		return parseXiaomiMimoStream(body, onDelta);
-	}
-
-	listModels(): ModelInfo[] {
-		return [{ id: "xiaomimo-chat", name: "MiMo Chat" }];
-	}
-
-	async close(): Promise<void> {
-		this.page = null;
 	}
 }

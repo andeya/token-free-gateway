@@ -1,57 +1,33 @@
 import type { Page } from "playwright-core";
-import { BrowserManager } from "../../browser/manager.ts";
-import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
+import { pasteText } from "../../browser/dom-input.ts";
+import { BaseDomClient } from "../factory/base-dom-client.ts";
+import type { DomClientConfig, NormalizedSendParams } from "../factory/types.ts";
+import { parseCookieHeader } from "../shared/cookie-parser.ts";
+import type { StreamResult } from "../types.ts";
 import type { GlmIntlWebAuth } from "./auth.ts";
 import { parseGlmIntlStream } from "./stream.ts";
 
-export class GlmIntlWebClient implements WebProviderClient {
+export class GlmIntlWebClient extends BaseDomClient<GlmIntlWebAuth> {
 	readonly providerId = "glm-intl-web";
-	private options: GlmIntlWebAuth;
-	private page: Page | null = null;
-	private initialized = false;
 
-	constructor(auth: GlmIntlWebAuth) {
-		this.options = auth;
+	protected readonly config: DomClientConfig = {
+		hostKey: "chat.z.ai",
+		startUrl: "https://chat.z.ai/",
+		cookieDomain: ".z.ai",
+		models: [
+			{ id: "glm-4-plus", name: "GLM-4 Plus" },
+			{ id: "glm-4-think", name: "GLM-4 Think" },
+		],
+		pollIntervalMs: 900,
+		maxWaitMs: 120_000,
+		stabilityThreshold: 3,
+	};
+
+	protected getCookies() {
+		return parseCookieHeader(this.auth.cookie, this.config.cookieDomain);
 	}
 
-	private parseCookies(): Array<{ name: string; value: string; domain: string; path: string }> {
-		return this.options.cookie
-			.split(";")
-			.filter((c) => c.trim().includes("="))
-			.map((cookie) => {
-				const [name, ...valueParts] = cookie.trim().split("=");
-				return {
-					name: name?.trim() ?? "",
-					value: valueParts.join("=").trim(),
-					domain: ".z.ai",
-					path: "/",
-				};
-			})
-			.filter((c) => c.name.length > 0);
-	}
-
-	async init(): Promise<void> {
-		if (this.initialized) {
-			return;
-		}
-
-		const bm = BrowserManager.getInstance();
-		this.page = await bm.getPage("chat.z.ai", "https://chat.z.ai/");
-		await bm.addCookies(this.parseCookies());
-
-		this.initialized = true;
-	}
-
-	async sendMessage(params: {
-		message: string;
-		model?: string;
-		signal?: AbortSignal;
-	}): Promise<ReadableStream<Uint8Array>> {
-		if (!this.page) {
-			throw new Error("GlmIntlWebClient not initialized");
-		}
-		const page = this.page;
-
+	protected async sendViaDom(page: Page, params: NormalizedSendParams): Promise<string> {
 		if (!page.url().includes("chat.z.ai")) {
 			await page.goto("https://chat.z.ai/", { waitUntil: "domcontentloaded", timeout: 120000 });
 		}
@@ -66,17 +42,15 @@ export class GlmIntlWebClient implements WebProviderClient {
 			await textarea.press("Enter");
 			sent = true;
 		}
-
 		if (!sent) {
 			const editable = page.locator('[contenteditable="true"]').first();
 			if ((await editable.count()) > 0) {
 				await editable.click({ timeout: 5000 });
-				await page.keyboard.type(params.message, { delay: 5 });
+				await pasteText(page, params.message);
 				await page.keyboard.press("Enter");
 				sent = true;
 			}
 		}
-
 		if (!sent) {
 			const input = page.locator('input[type="text"]').first();
 			if ((await input.count()) > 0) {
@@ -94,10 +68,7 @@ export class GlmIntlWebClient implements WebProviderClient {
 				}
 			}
 		}
-
-		if (!sent) {
-			throw new Error("GLM Intl UI send failed: no chat input found.");
-		}
+		if (!sent) throw new Error("GLM Intl UI send failed: no chat input found.");
 
 		await page
 			.waitForFunction(
@@ -107,59 +78,19 @@ export class GlmIntlWebClient implements WebProviderClient {
 			)
 			.catch(() => {});
 
-		const deadline = Date.now() + 120000;
-		let stableRounds = 0;
-		let lastText = "";
-		while (Date.now() < deadline) {
-			const text = await page.evaluate(() => {
+		return this.pollForStableText(async () => {
+			return page.evaluate(() => {
 				const nodes = Array.from(document.querySelectorAll(".chat-assistant"));
 				const latest = nodes[nodes.length - 1] as HTMLElement | undefined;
 				return (latest?.innerText ?? "").trim();
 			});
-
-			if (text && text === lastText) {
-				stableRounds += 1;
-			} else {
-				stableRounds = 0;
-				lastText = text;
-			}
-
-			if (lastText && stableRounds >= 3) {
-				break;
-			}
-			await new Promise((r) => setTimeout(r, 900));
-		}
-
-		if (!lastText) {
-			throw new Error("GLM Intl UI reply capture failed: assistant message not found.");
-		}
-
-		const payload = `data: ${JSON.stringify({ text: lastText })}\n\n`;
-		const encoder = new TextEncoder();
-		return new ReadableStream({
-			start(controller) {
-				controller.enqueue(encoder.encode(payload));
-				controller.close();
-			},
-		});
+		}, params.signal);
 	}
 
-	async parseStream(
+	protected parseStreamImpl(
 		body: ReadableStream<Uint8Array>,
 		onDelta?: (delta: string) => void,
 	): Promise<StreamResult> {
 		return parseGlmIntlStream(body, onDelta);
-	}
-
-	listModels(): ModelInfo[] {
-		return [
-			{ id: "glm-4-plus", name: "GLM-4 Plus" },
-			{ id: "glm-4-think", name: "GLM-4 Think" },
-		];
-	}
-
-	async close(): Promise<void> {
-		this.page = null;
-		this.initialized = false;
 	}
 }
