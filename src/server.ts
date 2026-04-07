@@ -1,4 +1,5 @@
 import { authenticate } from "./auth.ts";
+import { BrowserManager } from "./browser/manager.ts";
 import { loadConfig } from "./config.ts";
 import { handleChatCompletions } from "./openai/chat-completions.ts";
 import { listAuthorizedProviders } from "./providers/auth-store.ts";
@@ -56,9 +57,11 @@ async function handleRequest(req: Request): Promise<Response> {
 
 	if (pathname === "/health" || pathname === "/healthz") {
 		const authorized = listAuthorizedProviders();
+		const browserHealthy = await BrowserManager.getInstance().isHealthy();
 		return withCors(
 			Response.json({
-				status: "ok",
+				status: browserHealthy ? "ok" : "degraded",
+				browser: browserHealthy ? "connected" : "disconnected",
 				providers: authorized.length,
 				models: (await listAllModels()).length,
 			}),
@@ -151,5 +154,14 @@ console.log(`Auth: ${config.gatewayApiKey ? "enabled (Bearer token)" : "disabled
 console.log(
 	`Authorized providers: ${authorized.length > 0 ? authorized.join(", ") : "none — run 'token-free-gateway webauth' to authorize"}`,
 );
+
+async function gracefulShutdown(signal: string) {
+	console.log(`\nReceived ${signal}, shutting down...`);
+	await BrowserManager.getInstance().shutdown();
+	server.stop(true);
+	process.exit(0);
+}
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 export { server };
