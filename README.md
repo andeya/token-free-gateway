@@ -77,7 +77,7 @@ token-free-gateway start      # background daemon (logs: ~/.token-free-gateway/g
 token-free-gateway serve      # foreground (for debugging)
 ```
 
-The gateway listens on `http://localhost:3456`.
+The gateway listens on `http://localhost:3456`. Chrome is checked (and auto-started if needed) before the daemon launches.
 
 ### 4. Use it
 
@@ -99,23 +99,23 @@ response = client.chat.completions.create(
 
 ## Supported Providers
 
-| Provider    | Model ID prefix | Auth Method           | Client         |
-| ----------- | --------------- | --------------------- | -------------- |
-| Claude      | `claude-*`      | Session cookie        | Fetch          |
-| ChatGPT     | `chatgpt-*`     | Access token + cookie | Playwright CDP |
-| DeepSeek    | `deepseek-*`    | Bearer token + cookie | Fetch (PoW)    |
-| Doubao      | `doubao-*`      | Session cookie        | Fetch          |
-| Gemini      | `gemini-*`      | Google SID cookie     | Playwright CDP |
-| GLM (智谱)  | `glm-*`         | Refresh token cookie  | Playwright CDP |
-| GLM Intl    | `glm-intl-*`    | Session cookie        | Playwright CDP |
-| Grok        | `grok-*`        | SSO cookie            | Playwright CDP |
-| Kimi        | `kimi-*`        | Access token          | Playwright CDP |
-| Perplexity  | `perplexity-*`  | Next-auth cookie      | Playwright CDP |
-| Qwen        | `qwen-*`        | Session cookie        | Playwright CDP |
-| Qwen CN     | `qwen-cn-*`     | XSRF + cookie         | Playwright CDP |
-| Xiaomi MiMo | `xiaomimo-*`    | Bearer token          | Fetch          |
+| Provider    | Model ID prefix | Auth Method           | Client                    |
+| ----------- | --------------- | --------------------- | ------------------------- |
+| Claude      | `claude-*`      | Session cookie        | CDP (browser fetch)       |
+| ChatGPT     | `chatgpt-*`     | Access token + cookie | CDP (browser fetch)       |
+| DeepSeek    | `deepseek-*`    | Bearer token + cookie | CDP (browser fetch + PoW) |
+| Doubao      | `doubao-*`      | Session cookie        | CDP (browser fetch)       |
+| Gemini      | `gemini-*`      | Google SID cookie     | CDP (browser fetch)       |
+| GLM (智谱)  | `glm-*`         | Refresh token cookie  | CDP (browser fetch)       |
+| GLM Intl    | `glm-intl-*`    | Session cookie        | CDP (browser fetch)       |
+| Grok        | `grok-*`        | SSO cookie            | CDP (browser fetch)       |
+| Kimi        | `kimi-*`        | Access token          | CDP (browser fetch)       |
+| Perplexity  | `perplexity-*`  | Next-auth cookie      | CDP (browser fetch)       |
+| Qwen        | `qwen-*`        | Session cookie        | CDP (browser fetch)       |
+| Qwen CN     | `qwen-cn-*`     | XSRF + cookie         | CDP (browser fetch)       |
+| Xiaomi MiMo | `xiaomimo-*`    | Bearer token          | CDP (browser fetch)       |
 
-> Playwright CDP providers require `playwright-core` at runtime: `npm i -g playwright-core`
+> All providers use a centralized `BrowserManager` that maintains a single shared CDP connection to Chrome with auto-reconnection and health monitoring. `playwright-core` is required at runtime: `npm i -g playwright-core`
 
 ---
 
@@ -164,7 +164,7 @@ GATEWAY_API_KEY=my-secret-key
 | `POST` | `/v1/chat/completions` | Chat completions (streaming + non-streaming) |
 | `GET`  | `/v1/models`           | List models from authorized providers        |
 | `GET`  | `/v1/models/:id`       | Get model details                            |
-| `GET`  | `/health`              | Health check                                 |
+| `GET`  | `/health`              | Health check (includes browser CDP status)   |
 
 ---
 
@@ -174,24 +174,33 @@ GATEWAY_API_KEY=my-secret-key
 sequenceDiagram
     participant C as Client (OpenAI SDK)
     participant G as Token-Free Gateway
+    participant B as BrowserManager
+    participant Ch as Chrome (CDP)
     participant P as Web AI Provider
 
     C->>G: POST /v1/chat/completions<br/>(messages + tools)
     G->>G: tools → prompt injection<br/>route to provider
-    G->>P: Send prompt via web session
-    P-->>G: Free-form text response
+    G->>B: getPage(provider domain)
+    B->>Ch: CDP connection (auto-reconnect)
+    Ch->>P: Browser-side fetch (with cookies)
+    P-->>Ch: Response
+    Ch-->>B: page.evaluate result
+    B-->>G: Parsed response
     G->>G: Parse text → tool_calls
     G-->>C: OpenAI-format tool_calls
 
     Note over C: Client executes tools locally
 
     C->>G: POST /v1/chat/completions<br/>(messages + tool results)
-    G->>P: Forward tool results
-    P-->>G: Final text response
+    G->>B: Forward via CDP
+    B->>Ch: Browser-side fetch
+    Ch->>P: Request with session
+    P-->>Ch: Final response
+    Ch-->>G: Result
     G-->>C: Final answer
 ```
 
-The gateway converts OpenAI's structured `tools` definitions into prompt-injected instructions, sends them to the web AI, and parses the free-form text response back into standard `tool_calls`. The client never knows it's not talking to OpenAI.
+All API requests to web AI providers are executed **inside the browser** via Chrome DevTools Protocol (CDP), bypassing Cloudflare and other bot-protection systems. A centralized `BrowserManager` singleton manages the shared CDP connection with auto-reconnection, health monitoring, and Chrome auto-start.
 
 ---
 
@@ -228,6 +237,7 @@ bun run bump:major  # Bump major version (X.0.0) and sync all package.json files
 | Problem                         | Solution                                                                  |
 | ------------------------------- | ------------------------------------------------------------------------- |
 | `/v1/models` returns empty      | Run `token-free-gateway webauth` to authorize providers                   |
+| `/health` returns `degraded`    | Chrome is not reachable — run `token-free-gateway chrome start`           |
 | webauth hangs                   | Press **Ctrl+C** — credentials are saved                                  |
 | Chrome auto-start fails         | Run `token-free-gateway chrome start` manually, then rerun `webauth`      |
 | Chrome port 9222 already in use | Stop conflicting process: `lsof -i:9222` / `netstat -ano \| findstr 9222` |

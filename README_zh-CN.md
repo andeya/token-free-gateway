@@ -77,7 +77,7 @@ token-free-gateway start      # 后台守护进程（日志：~/.token-free-gate
 token-free-gateway serve      # 前台运行（调试用）
 ```
 
-网关默认监听 `http://localhost:3456`。
+网关默认监听 `http://localhost:3456`。守护进程启动前会自动检查 Chrome 是否就绪，未就绪时会自动启动。
 
 ### 4. 接入使用
 
@@ -99,23 +99,23 @@ response = client.chat.completions.create(
 
 ## 支持的平台
 
-| 平台       | 模型 ID 前缀   | 认证方式              | 客户端类型      |
-| ---------- | -------------- | --------------------- | --------------- |
-| Claude     | `claude-*`     | Session cookie        | Fetch           |
-| ChatGPT    | `chatgpt-*`    | Access token + cookie | Playwright CDP  |
-| DeepSeek   | `deepseek-*`   | Bearer token + cookie | Fetch（含 PoW） |
-| 豆包       | `doubao-*`     | Session cookie        | Fetch           |
-| Gemini     | `gemini-*`     | Google SID cookie     | Playwright CDP  |
-| 智谱 GLM   | `glm-*`        | Refresh token cookie  | Playwright CDP  |
-| GLM 国际版 | `glm-intl-*`   | Session cookie        | Playwright CDP  |
-| Grok       | `grok-*`       | SSO cookie            | Playwright CDP  |
-| Kimi       | `kimi-*`       | Access token          | Playwright CDP  |
-| Perplexity | `perplexity-*` | Next-auth cookie      | Playwright CDP  |
-| 千问国际版 | `qwen-*`       | Session cookie        | Playwright CDP  |
-| 千问国内版 | `qwen-cn-*`    | XSRF + cookie         | Playwright CDP  |
-| 小米 MiMo  | `xiaomimo-*`   | Bearer token          | Fetch           |
+| 平台       | 模型 ID 前缀   | 认证方式              | 客户端类型                |
+| ---------- | -------------- | --------------------- | ------------------------- |
+| Claude     | `claude-*`     | Session cookie        | CDP（浏览器 fetch）       |
+| ChatGPT    | `chatgpt-*`    | Access token + cookie | CDP（浏览器 fetch）       |
+| DeepSeek   | `deepseek-*`   | Bearer token + cookie | CDP（浏览器 fetch + PoW） |
+| 豆包       | `doubao-*`     | Session cookie        | CDP（浏览器 fetch）       |
+| Gemini     | `gemini-*`     | Google SID cookie     | CDP（浏览器 fetch）       |
+| 智谱 GLM   | `glm-*`        | Refresh token cookie  | CDP（浏览器 fetch）       |
+| GLM 国际版 | `glm-intl-*`   | Session cookie        | CDP（浏览器 fetch）       |
+| Grok       | `grok-*`       | SSO cookie            | CDP（浏览器 fetch）       |
+| Kimi       | `kimi-*`       | Access token          | CDP（浏览器 fetch）       |
+| Perplexity | `perplexity-*` | Next-auth cookie      | CDP（浏览器 fetch）       |
+| 千问国际版 | `qwen-*`       | Session cookie        | CDP（浏览器 fetch）       |
+| 千问国内版 | `qwen-cn-*`    | XSRF + cookie         | CDP（浏览器 fetch）       |
+| 小米 MiMo  | `xiaomimo-*`   | Bearer token          | CDP（浏览器 fetch）       |
 
-> Playwright CDP 类 provider 需要安装运行时依赖：`npm i -g playwright-core`
+> 所有 provider 均通过统一的 `BrowserManager` 管理，共享一个 CDP 连接到 Chrome，支持自动重连和健康监控。运行时依赖 `playwright-core`：`npm i -g playwright-core`
 
 ---
 
@@ -159,12 +159,12 @@ GATEWAY_API_KEY=my-secret-key
 
 ## API 端点
 
-| 方法   | 路径                   | 说明                         |
-| ------ | ---------------------- | ---------------------------- |
-| `POST` | `/v1/chat/completions` | 对话补全（支持流式与非流式） |
-| `GET`  | `/v1/models`           | 列出已授权平台的模型         |
-| `GET`  | `/v1/models/:id`       | 查询模型详情                 |
-| `GET`  | `/health`              | 健康检查                     |
+| 方法   | 路径                   | 说明                          |
+| ------ | ---------------------- | ----------------------------- |
+| `POST` | `/v1/chat/completions` | 对话补全（支持流式与非流式）  |
+| `GET`  | `/v1/models`           | 列出已授权平台的模型          |
+| `GET`  | `/v1/models/:id`       | 查询模型详情                  |
+| `GET`  | `/health`              | 健康检查（含浏览器 CDP 状态） |
 
 ---
 
@@ -174,24 +174,33 @@ GATEWAY_API_KEY=my-secret-key
 sequenceDiagram
     participant C as 客户端（OpenAI SDK）
     participant G as Token-Free Gateway
+    participant B as BrowserManager
+    participant Ch as Chrome（CDP）
     participant P as Web AI 平台
 
     C->>G: POST /v1/chat/completions<br/>（messages + tools）
     G->>G: tools → 提示词注入<br/>路由到对应平台
-    G->>P: 通过 Web 会话发送提示词
-    P-->>G: 自由文本响应
+    G->>B: getPage(provider domain)
+    B->>Ch: CDP 连接（自动重连）
+    Ch->>P: 浏览器端 fetch（携带 Cookie）
+    P-->>Ch: 响应
+    Ch-->>B: page.evaluate 结果
+    B-->>G: 解析后的响应
     G->>G: 解析文本 → tool_calls
     G-->>C: 返回 OpenAI 格式的 tool_calls
 
     Note over C: 客户端本地执行工具
 
     C->>G: POST /v1/chat/completions<br/>（messages + tool 结果）
-    G->>P: 转发工具执行结果
-    P-->>G: 最终文本响应
+    G->>B: 通过 CDP 转发
+    B->>Ch: 浏览器端 fetch
+    Ch->>P: 携带会话的请求
+    P-->>Ch: 最终响应
+    Ch-->>G: 结果
     G-->>C: 返回最终回答
 ```
 
-网关将 OpenAI 的结构化 `tools` 定义转换为提示词注入指令，发送给 Web AI，再将模型的自由文本响应解析为标准 `tool_calls`。客户端完全感知不到后端并非 OpenAI。
+所有对 Web AI 平台的 API 请求均在**浏览器内部**通过 Chrome DevTools Protocol（CDP）执行，绕过 Cloudflare 等反爬保护。统一的 `BrowserManager` 单例管理共享的 CDP 连接，支持自动重连、健康监控和 Chrome 自动启动。
 
 ---
 
@@ -225,15 +234,16 @@ bun run bump:major  # 升级主版本（X.0.0），同步所有 package.json
 
 ## 常见问题
 
-| 问题                    | 解决方案                                                         |
-| ----------------------- | ---------------------------------------------------------------- |
-| `/v1/models` 返回空列表 | 执行 `token-free-gateway webauth` 授权平台                       |
-| webauth 卡住            | 按 **Ctrl+C** —— 凭证已保存                                      |
-| Chrome 自动启动失败     | 手动执行 `token-free-gateway chrome start`，再重新运行 `webauth` |
-| 9222 端口被占用         | 检查冲突进程：`lsof -i:9222`                                     |
-| Playwright 报错         | 安装 `playwright-core`：`npm i -g playwright-core`               |
-| DeepSeek 认证失败       | 运行 webauth 时保持 DeepSeek 页面打开                            |
-| 守护进程启动失败        | 查看日志：`~/.token-free-gateway/gateway.log`                    |
+| 问题                      | 解决方案                                                         |
+| ------------------------- | ---------------------------------------------------------------- |
+| `/v1/models` 返回空列表   | 执行 `token-free-gateway webauth` 授权平台                       |
+| `/health` 返回 `degraded` | Chrome 不可达，执行 `token-free-gateway chrome start`            |
+| webauth 卡住              | 按 **Ctrl+C** —— 凭证已保存                                      |
+| Chrome 自动启动失败       | 手动执行 `token-free-gateway chrome start`，再重新运行 `webauth` |
+| 9222 端口被占用           | 检查冲突进程：`lsof -i:9222`                                     |
+| Playwright 报错           | 安装 `playwright-core`：`npm i -g playwright-core`               |
+| DeepSeek 认证失败         | 运行 webauth 时保持 DeepSeek 页面打开                            |
+| 守护进程启动失败          | 查看日志：`~/.token-free-gateway/gateway.log`                    |
 
 ---
 
