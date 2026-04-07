@@ -41,4 +41,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # IDE
 .vscode
 .cursor
-.cursorrules
+.cursorrulestsc.log
