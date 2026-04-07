@@ -20,24 +20,34 @@ Token-Free Gateway is a lightweight OpenAI-compatible API server that turns web-
 - **One endpoint, 13 providers** — Claude, ChatGPT, DeepSeek, Doubao, Gemini, GLM, GLM Intl, Grok, Kimi, Perplexity, Qwen, Qwen CN, Xiaomi MiMo
 - **100% OpenAI-compatible** — `/v1/chat/completions`, `/v1/models`, streaming, tool_calls — zero client-side changes
 - **Full Function Calling** — tools are injected as prompts, responses are parsed back into standard `tool_calls`
-- **Cross-platform binary** — single executable for macOS, Linux, and Windows
+- **Single binary, batteries included** — `playwright-core` is bundled; the **only** external dependency is Chrome
+- **Cross-platform** — macOS, Linux, Windows
 - **Daemon mode** — `start` / `stop` / `restart` / `status` like a proper service
+
+---
+
+## Prerequisites
+
+| Requirement | Details |
+| ----------- | ------- |
+| **Chrome (or Chromium)** | Install from [google.com/chrome](https://www.google.com/chrome/) or your OS package manager. Keep it updated to a **recent stable** version. The gateway controls your browser over CDP — it does **not** embed a browser. |
+| **Node.js 18+** *(npm install only)* | Required only if you install via `npm install -g`. Not needed for prebuilt binaries or building from source. |
+
+> **Does my Chrome version need to "match" something?** — No. The gateway connects to your Chrome's debug WebSocket; CDP stays compatible across recent Chrome versions. No `playwright install` is required — the bundled `playwright-core` is only used as a CDP library, not for launching browsers.
 
 ---
 
 ## Quick Start
 
-### 1. Install
+### Step 1 — Install
+
+Choose **one** method:
 
 **Via npm** (recommended):
 
 ```bash
 npm install -g token-free-gateway
-# or run directly without installing:
-npx token-free-gateway --help
 ```
-
-> npm packages require `playwright-core` at runtime for browser-based providers: `npm i -g playwright-core`
 
 **Prebuilt binary** — download from [GitHub Releases](../../releases):
 
@@ -54,9 +64,9 @@ bun install
 bun run build    # → ./token-free-gateway
 ```
 
-### 2. Authorize providers
+### Step 2 — Authorize providers
 
-Run the authorization wizard. Chrome will **start automatically** if it is not already running:
+Run the authorization wizard. Chrome will **start automatically** if it is not already running in debug mode:
 
 ```bash
 token-free-gateway webauth
@@ -67,32 +77,68 @@ Chrome opens with login pages for all 13 providers. Log in to the ones you want,
 > **DeepSeek:** keep the DeepSeek chat page open while running `webauth` — the wizard captures the bearer token from the live session.
 >
 > **Tip:** if the terminal doesn't return after authorization, press **Ctrl+C** — credentials are already saved.
->
-> **Manual Chrome control:** `chrome start` and `chrome stop` are also available as standalone commands if you need explicit control over the Chrome debug instance.
 
-### 3. Start the gateway
+### Step 3 — Start the gateway
 
 ```bash
 token-free-gateway start      # background daemon (logs: ~/.token-free-gateway/gateway.log)
 token-free-gateway serve      # foreground (for debugging)
 ```
 
-The gateway listens on `http://localhost:3456`. Chrome is checked (and auto-started if needed) before the daemon launches.
+The gateway listens on `http://localhost:3456` by default. Chrome is checked (and auto-started if needed) before the daemon launches.
 
-### 4. Use it
+### Step 4 — Use it
+
+Point **any** OpenAI SDK client at the gateway:
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:3456/v1",
-    api_key="any-string",
+    api_key="any-string",          # or your TFG_API_KEY if configured
 )
 
+# Simple chat
 response = client.chat.completions.create(
     model="claude-sonnet-4-20250514",
     messages=[{"role": "user", "content": "Hello!"}],
 )
+print(response.choices[0].message.content)
+```
+
+**Function Calling** works out of the box:
+
+```python
+response = client.chat.completions.create(
+    model="claude-sonnet-4-20250514",
+    messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+    tools=[{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        },
+    }],
+)
+# response.choices[0].message.tool_calls → standard OpenAI tool_calls
+```
+
+**cURL:**
+
+```bash
+# List available models
+curl http://localhost:3456/v1/models
+
+# Chat completion
+curl http://localhost:3456/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hello!"}]}'
 ```
 
 ---
@@ -115,7 +161,7 @@ response = client.chat.completions.create(
 | Qwen CN     | `qwen-cn-*`     | XSRF + cookie         | CDP (browser fetch)       |
 | Xiaomi MiMo | `xiaomimo-*`    | Bearer token          | CDP (browser fetch)       |
 
-> All providers use a centralized `BrowserManager` that maintains a single shared CDP connection to Chrome with auto-reconnection and health monitoring. `playwright-core` is required at runtime: `npm i -g playwright-core`
+> All providers share a centralized `BrowserManager` that maintains a single CDP connection to Chrome with auto-reconnection and health monitoring.
 
 ---
 
@@ -280,7 +326,6 @@ bun run bump:major  # Bump major version (X.0.0) and sync all package.json files
 | webauth hangs                   | Press **Ctrl+C** — credentials are saved                                  |
 | Chrome auto-start fails         | Run `token-free-gateway chrome start` manually, then rerun `webauth`      |
 | Chrome port 9222 already in use | Stop conflicting process: `lsof -i:9222` / `netstat -ano \| findstr 9222` |
-| Playwright errors               | Install `playwright-core`: `npm i -g playwright-core`                     |
 | DeepSeek auth fails             | Keep DeepSeek chat page open during `webauth`                             |
 | Daemon not starting             | Check logs: `~/.token-free-gateway/gateway.log`                           |
 

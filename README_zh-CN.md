@@ -20,24 +20,34 @@ Token-Free Gateway 是一个轻量级 OpenAI 兼容 API 网关，将网页端 AI
 - **一个接口，13 个平台** — Claude、ChatGPT、DeepSeek、豆包、Gemini、智谱 GLM、GLM 国际版、Grok、Kimi、Perplexity、千问国际版、千问国内版、小米 MiMo
 - **100% OpenAI 兼容** — `/v1/chat/completions`、`/v1/models`、流式输出、`tool_calls` —— 客户端零改造
 - **完整 Function Calling** — 将 tools 定义注入提示词，解析模型回复为标准 `tool_calls` 格式
-- **跨平台二进制** — macOS、Linux、Windows 单文件可执行
+- **单文件即用** — `playwright-core` 已内置于二进制中；**唯一的外部依赖就是 Chrome**
+- **跨平台** — macOS、Linux、Windows
 - **守护进程模式** — `start` / `stop` / `restart` / `status`，像正规服务一样管理
+
+---
+
+## 环境准备
+
+| 依赖 | 说明 |
+| ---- | ---- |
+| **Chrome（或 Chromium）** | 从 [google.com/chrome](https://www.google.com/chrome/) 或系统包管理器安装，保持**较新稳定版**即可。网关通过 CDP 控制你本机浏览器，**不包含**内置浏览器。 |
+| **Node.js 18+** *（仅 npm 安装时需要）* | 仅当你通过 `npm install -g` 安装时需要。预编译二进制或源码构建无需 Node.js。 |
+
+> **Chrome 版本要和某个版本一致吗？** — **不需要。** 网关通过 WebSocket 连接 Chrome 远程调试端口，CDP 在近期版本间通常兼容。也**不需要**执行 `playwright install` —— 打包在二进制中的 `playwright-core` 仅用作 CDP 连接库，不会下载/启动自带浏览器。
 
 ---
 
 ## 快速开始
 
-### 1. 安装
+### 第 1 步 — 安装
+
+任选 **一种** 方式：
 
 **通过 npm**（推荐）：
 
 ```bash
 npm install -g token-free-gateway
-# 或免安装直接运行：
-npx token-free-gateway --help
 ```
-
-> npm 包在运行时需要 `playwright-core` 支持浏览器类 provider：`npm i -g playwright-core`
 
 **下载预编译二进制** —— 从 [GitHub Releases](../../releases) 获取：
 
@@ -54,7 +64,7 @@ bun install
 bun run build    # → ./token-free-gateway
 ```
 
-### 2. 授权平台
+### 第 2 步 — 授权平台
 
 运行授权向导，若 Chrome 尚未以调试模式运行，**将自动启动**：
 
@@ -67,10 +77,8 @@ Chrome 会打开所有 13 个平台的登录页面。在浏览器中完成登录
 > **DeepSeek 特殊说明：** 运行 `webauth` 时需要保持 DeepSeek 聊天页面处于打开状态，向导会自动抓取 bearer token。
 >
 > **提示：** 授权完成后如果终端未返回提示符，按 **Ctrl+C** 即可 —— 凭证已保存。
->
-> **手动控制 Chrome：** 也可单独使用 `chrome start` / `chrome stop` 命令显式管理 Chrome 调试实例。
 
-### 3. 启动网关
+### 第 3 步 — 启动网关
 
 ```bash
 token-free-gateway start      # 后台守护进程（日志：~/.token-free-gateway/gateway.log）
@@ -79,20 +87,58 @@ token-free-gateway serve      # 前台运行（调试用）
 
 网关默认监听 `http://localhost:3456`。守护进程启动前会自动检查 Chrome 是否就绪，未就绪时会自动启动。
 
-### 4. 接入使用
+### 第 4 步 — 接入使用
+
+将 **任意** OpenAI SDK 客户端指向网关即可：
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:3456/v1",
-    api_key="any-string",
+    api_key="any-string",          # 若配置了 TFG_API_KEY 则填写对应值
 )
 
+# 简单对话
 response = client.chat.completions.create(
     model="claude-sonnet-4-20250514",
     messages=[{"role": "user", "content": "你好！"}],
 )
+print(response.choices[0].message.content)
+```
+
+**Function Calling** 开箱即用：
+
+```python
+response = client.chat.completions.create(
+    model="claude-sonnet-4-20250514",
+    messages=[{"role": "user", "content": "东京现在天气怎么样？"}],
+    tools=[{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "查询城市当前天气",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        },
+    }],
+)
+# response.choices[0].message.tool_calls → 标准 OpenAI tool_calls 格式
+```
+
+**cURL 示例：**
+
+```bash
+# 列出可用模型
+curl http://localhost:3456/v1/models
+
+# 对话请求
+curl http://localhost:3456/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"你好！"}]}'
 ```
 
 ---
@@ -115,7 +161,7 @@ response = client.chat.completions.create(
 | 千问国内版 | `qwen-cn-*`    | XSRF + cookie         | CDP（浏览器 fetch）       |
 | 小米 MiMo  | `xiaomimo-*`   | Bearer token          | CDP（浏览器 fetch）       |
 
-> 所有 provider 均通过统一的 `BrowserManager` 管理，共享一个 CDP 连接到 Chrome，支持自动重连和健康监控。运行时依赖 `playwright-core`：`npm i -g playwright-core`
+> 所有 provider 均通过统一的 `BrowserManager` 管理，共享一个 CDP 连接到 Chrome，支持自动重连和健康监控。
 
 ---
 
@@ -280,7 +326,6 @@ bun run bump:major  # 升级主版本（X.0.0），同步所有 package.json
 | webauth 卡住              | 按 **Ctrl+C** —— 凭证已保存                                      |
 | Chrome 自动启动失败       | 手动执行 `token-free-gateway chrome start`，再重新运行 `webauth` |
 | 9222 端口被占用           | 检查冲突进程：`lsof -i:9222`                                     |
-| Playwright 报错           | 安装 `playwright-core`：`npm i -g playwright-core`               |
 | DeepSeek 认证失败         | 运行 webauth 时保持 DeepSeek 页面打开                            |
 | 守护进程启动失败          | 查看日志：`~/.token-free-gateway/gateway.log`                    |
 
