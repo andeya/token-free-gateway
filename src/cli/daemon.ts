@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getChromeWebSocketUrl, getDefaultCdpUrl } from "../browser/cdp-helpers.ts";
+import { loadConfig } from "../config.ts";
 import { startChrome } from "./chrome.ts";
 
 const DATA_DIR = join(homedir(), ".token-free-gateway");
@@ -95,9 +96,10 @@ async function ensureChromeReady(): Promise<void> {
 export async function startDaemon() {
 	await ensureDataDir();
 
+	const { port } = loadConfig();
+
 	const existing = readPid();
 	if (existing && isRunning(existing)) {
-		const port = process.env.PORT || "3456";
 		console.log(`Gateway is already running (PID: ${existing}) on http://localhost:${port}`);
 		console.log(`Logs: ${LOG_FILE}`);
 		return;
@@ -106,7 +108,6 @@ export async function startDaemon() {
 	await ensureChromeReady();
 
 	const logFd = openSync(LOG_FILE, "a");
-
 	const proc = Bun.spawn({
 		cmd: buildSpawnCmd(),
 		detached: true,
@@ -116,17 +117,12 @@ export async function startDaemon() {
 		env: process.env as Record<string, string>,
 	});
 	proc.unref();
-
-	// Close parent's copy of the fd — child has inherited it
 	closeSync(logFd);
 
 	await writeFile(PID_FILE, String(proc.pid));
-
-	// Brief wait to detect immediate crash
 	await Bun.sleep(600);
 
 	if (proc.pid && isRunning(proc.pid)) {
-		const port = process.env.PORT || "3456";
 		console.log(`Gateway started (PID: ${proc.pid})`);
 		console.log(`Listening on http://localhost:${port}`);
 		console.log(`Logs: ${LOG_FILE}`);

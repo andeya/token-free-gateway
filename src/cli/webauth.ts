@@ -7,6 +7,7 @@
  */
 
 import { createInterface } from "node:readline";
+import { loadConfig } from "../config.ts";
 import { listAuthorizedProviders, saveCredentials } from "../providers/auth-store.ts";
 import { listProviderDefinitions } from "../providers/registry.ts";
 
@@ -15,7 +16,7 @@ function question(rl: ReturnType<typeof createInterface>, prompt: string): Promi
 }
 
 async function isChromeReady(): Promise<boolean> {
-	const cdpUrl = process.env.CDP_URL ?? "http://127.0.0.1:9222";
+	const cdpUrl = loadConfig().cdpUrl;
 	try {
 		const res = await fetch(`${cdpUrl}/json/version`);
 		return res.ok;
