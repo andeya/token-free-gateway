@@ -1,11 +1,17 @@
 import { authenticate } from "./auth.ts";
 import { BrowserManager } from "./browser/manager.ts";
 import { loadConfig } from "./config.ts";
-import { handleChatCompletions } from "./openai/chat-completions.ts";
+import { handleChatCompletions, setRouteTimeoutSec } from "./openai/chat-completions.ts";
 import { listAuthorizedProviders } from "./providers/auth-store.ts";
-import { getClientForModel, listAllModels, resolveModelToProvider } from "./providers/registry.ts";
+import {
+	checkAllSessions,
+	getClientForModel,
+	listAllModels,
+	resolveModelToProvider,
+} from "./providers/registry.ts";
 
 const config = loadConfig();
+setRouteTimeoutSec(config.requestTimeoutSec);
 
 const CORS_HEADERS: Record<string, string> = {
 	"Access-Control-Allow-Origin": "*",
@@ -71,11 +77,15 @@ async function handleRequest(req: Request): Promise<Response> {
 async function handleHealthRoute(): Promise<Response> {
 	const authorized = listAuthorizedProviders();
 	const browserHealthy = await BrowserManager.getInstance().isHealthy();
+	const sessions = await checkAllSessions();
+	const hasExpired = Object.values(sessions).some((s) => !s.valid && s.reason !== "unchecked");
+	const overallStatus = !browserHealthy ? "degraded" : hasExpired ? "session_expired" : "ok";
 	return Response.json({
-		status: browserHealthy ? "ok" : "degraded",
+		status: overallStatus,
 		browser: browserHealthy ? "connected" : "disconnected",
 		providers: authorized.length,
 		models: (await listAllModels()).length,
+		sessions,
 	});
 }
 
@@ -139,11 +149,18 @@ async function handleModelByIdRoute(modelId: string): Promise<Response> {
 
 // ── Server bootstrap ─────────────────────────────────────────
 
-const server = Bun.serve({ port: config.port, fetch: handleRequest });
+const server = Bun.serve({
+	port: config.port,
+	fetch: handleRequest,
+	// Disable Bun's built-in idle timeout (default 10s).
+	// Route-level timeouts are managed by handleChatCompletions via Promise.race.
+	idleTimeout: 0,
+});
 
 const authorized = listAuthorizedProviders();
 console.log(`Token-Free Gateway listening on http://localhost:${server.port}`);
 console.log(`Auth: ${config.gatewayApiKey ? "enabled (Bearer token)" : "disabled"}`);
+console.log(`Request timeout: ${config.requestTimeoutSec}s`);
 console.log(
 	`Authorized providers: ${authorized.length > 0 ? authorized.join(", ") : "none — run 'token-free-gateway webauth' to authorize"}`,
 );
