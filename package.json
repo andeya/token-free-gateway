@@ -19,7 +19,8 @@
 		"bump": "bun scripts/bump-version.ts",
 		"bump:patch": "bun scripts/bump-version.ts patch",
 		"bump:minor": "bun scripts/bump-version.ts minor",
-		"bump:major": "bun scripts/bump-version.ts major"
+		"bump:major": "bun scripts/bump-version.ts major",
+		"postinstall": "bun scripts/postinstall.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "latest",

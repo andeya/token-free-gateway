@@ -45,9 +45,10 @@ function readRootVersion(): string {
 }
 
 function incrementVersion(current: string, level: (typeof INCREMENTS)[number]): string {
-	const parts = current.split(".").map(Number);
+	const [major = 0, minor = 0, patch = 0] = current.split(".").map(Number);
+	const parts = [major, minor, patch];
 	const idx = INCREMENTS.indexOf(level);
-	parts[idx] += 1;
+	parts[idx]! += 1;
 	for (let i = idx + 1; i < 3; i++) parts[i] = 0;
 	return parts.join(".");
 }

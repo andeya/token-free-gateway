@@ -59,7 +59,6 @@ if (command === "webauth") {
 	const { statusDaemon } = await import("./src/cli/daemon.ts");
 	await statusDaemon();
 } else if (!command || command === "serve" || command === "__serve") {
-	// __serve is the internal command used by daemon mode
 	await import("./src/server.ts");
 } else {
 	console.error(`Unknown command: ${command}\nRun 'token-free-gateway --help' for usage.`);
