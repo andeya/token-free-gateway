@@ -1,11 +1,11 @@
 import { authenticate } from "./auth.ts";
 import { BrowserManager } from "./browser/manager.ts";
-import { loadConfig } from "./config.ts";
+import { ensureConfigFile, loadConfig } from "./config.ts";
 import { handleChatCompletions } from "./openai/chat-completions.ts";
 import { listAuthorizedProviders } from "./providers/auth-store.ts";
 import { getClientForModel, listAllModels, resolveModelToProvider } from "./providers/registry.ts";
-import type { WebProviderClient } from "./providers/types.ts";
 
+ensureConfigFile();
 const config = loadConfig();
 
 const CORS_HEADERS: Record<string, string> = {
@@ -15,28 +15,27 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 function withCors(res: Response): Response {
-	const merged: Record<string, string> = {};
+	const headers: Record<string, string> = {};
 	res.headers.forEach((v, k) => {
-		merged[k] = v;
+		headers[k] = v;
 	});
 	return new Response(res.body, {
 		status: res.status,
 		statusText: res.statusText,
-		headers: { ...merged, ...CORS_HEADERS },
+		headers: { ...headers, ...CORS_HEADERS },
 	});
 }
 
-async function resolveProvider(body: { model?: string }): Promise<WebProviderClient | null> {
-	const model = body.model || "";
-	return getClientForModel(model);
-}
-
 async function handleRequest(req: Request): Promise<Response> {
-	const url = new URL(req.url);
-	const { pathname } = url;
+	const { pathname } = new URL(req.url);
 
 	if (req.method === "OPTIONS") {
 		return new Response(null, { status: 204, headers: CORS_HEADERS });
+	}
+
+	// Health check is public — no auth required (load balancers, monitoring)
+	if (pathname === "/health" || pathname === "/healthz") {
+		return withCors(await handleHealthRoute());
 	}
 
 	const authError = authenticate(req, config.gatewayApiKey);
@@ -55,19 +54,6 @@ async function handleRequest(req: Request): Promise<Response> {
 		return withCors(await handleModelByIdRoute(modelId));
 	}
 
-	if (pathname === "/health" || pathname === "/healthz") {
-		const authorized = listAuthorizedProviders();
-		const browserHealthy = await BrowserManager.getInstance().isHealthy();
-		return withCors(
-			Response.json({
-				status: browserHealthy ? "ok" : "degraded",
-				browser: browserHealthy ? "connected" : "disconnected",
-				providers: authorized.length,
-				models: (await listAllModels()).length,
-			}),
-		);
-	}
-
 	return withCors(
 		Response.json(
 			{
@@ -81,10 +67,23 @@ async function handleRequest(req: Request): Promise<Response> {
 	);
 }
 
+// ── Route handlers ───────────────────────────────────────────
+
+async function handleHealthRoute(): Promise<Response> {
+	const authorized = listAuthorizedProviders();
+	const browserHealthy = await BrowserManager.getInstance().isHealthy();
+	return Response.json({
+		status: browserHealthy ? "ok" : "degraded",
+		browser: browserHealthy ? "connected" : "disconnected",
+		providers: authorized.length,
+		models: (await listAllModels()).length,
+	});
+}
+
 async function handleChatCompletionsRoute(req: Request): Promise<Response> {
 	let body: any;
 	try {
-		body = await req.clone().json();
+		body = await req.json();
 	} catch {
 		return Response.json(
 			{ error: { message: "Invalid JSON body", type: "invalid_request_error" } },
@@ -92,7 +91,7 @@ async function handleChatCompletionsRoute(req: Request): Promise<Response> {
 		);
 	}
 
-	const provider = await resolveProvider(body);
+	const provider = await getClientForModel(body.model || "");
 	if (!provider) {
 		return Response.json(
 			{
@@ -105,22 +104,19 @@ async function handleChatCompletionsRoute(req: Request): Promise<Response> {
 		);
 	}
 
-	return handleChatCompletions(req, provider);
+	return handleChatCompletions(body, provider);
 }
 
 async function handleModelsRoute(): Promise<Response> {
 	const models = await listAllModels();
 	const now = Math.floor(Date.now() / 1000);
 	const data = await Promise.all(
-		models.map(async (m) => {
-			const providerId = await resolveModelToProvider(m.id);
-			return {
-				id: m.id,
-				object: "model" as const,
-				created: now,
-				owned_by: providerId ?? "web-provider",
-			};
-		}),
+		models.map(async (m) => ({
+			id: m.id,
+			object: "model" as const,
+			created: now,
+			owned_by: (await resolveModelToProvider(m.id)) ?? "web-provider",
+		})),
 	);
 	return Response.json({ object: "list", data });
 }
@@ -134,19 +130,17 @@ async function handleModelByIdRoute(modelId: string): Promise<Response> {
 			{ status: 404 },
 		);
 	}
-	const providerId = await resolveModelToProvider(model.id);
 	return Response.json({
 		id: model.id,
 		object: "model",
 		created: Math.floor(Date.now() / 1000),
-		owned_by: providerId ?? "web-provider",
+		owned_by: (await resolveModelToProvider(model.id)) ?? "web-provider",
 	});
 }
 
-const server = Bun.serve({
-	port: config.port,
-	fetch: handleRequest,
-});
+// ── Server bootstrap ─────────────────────────────────────────
+
+const server = Bun.serve({ port: config.port, fetch: handleRequest });
 
 const authorized = listAuthorizedProviders();
 console.log(`Token-Free Gateway listening on http://localhost:${server.port}`);
