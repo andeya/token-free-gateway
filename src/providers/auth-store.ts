@@ -5,7 +5,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export interface AuthProfile {
 	providerId: string;
@@ -17,30 +17,37 @@ export interface AuthStore {
 	profiles: Record<string, AuthProfile>;
 }
 
-const CONFIG_DIR = join(homedir(), ".token-free-gateway");
-const STORE_PATH = join(CONFIG_DIR, "auth-profiles.json");
+const DEFAULT_STORE_PATH = join(homedir(), ".token-free-gateway", "auth-profiles.json");
 
-function ensureConfigDir(): void {
-	if (!existsSync(CONFIG_DIR)) {
-		mkdirSync(CONFIG_DIR, { recursive: true });
+/** Returns the active store path. Override with TOKEN_FREE_GATEWAY_STORE_PATH (used in tests). */
+export function getStorePath(): string {
+	return process.env.TOKEN_FREE_GATEWAY_STORE_PATH ?? DEFAULT_STORE_PATH;
+}
+
+function ensureStoreDir(storePath: string): void {
+	const dir = dirname(storePath);
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
 	}
 }
 
 export function loadAuthStore(): AuthStore {
+	const storePath = getStorePath();
 	try {
-		if (existsSync(STORE_PATH)) {
-			const raw = readFileSync(STORE_PATH, "utf-8");
+		if (existsSync(storePath)) {
+			const raw = readFileSync(storePath, "utf-8");
 			return JSON.parse(raw) as AuthStore;
 		}
 	} catch (e) {
-		console.warn(`[auth-store] Failed to load ${STORE_PATH}: ${e}`);
+		console.warn(`[auth-store] Failed to load ${storePath}: ${e}`);
 	}
 	return { profiles: {} };
 }
 
 export function saveAuthStore(store: AuthStore): void {
-	ensureConfigDir();
-	writeFileSync(STORE_PATH, JSON.stringify(store, null, 2), "utf-8");
+	const storePath = getStorePath();
+	ensureStoreDir(storePath);
+	writeFileSync(storePath, JSON.stringify(store, null, 2), "utf-8");
 }
 
 export function getCredentials<T = unknown>(providerId: string): T | null {
@@ -63,8 +70,4 @@ export function saveCredentials(providerId: string, credentials: unknown): void 
 export function listAuthorizedProviders(): string[] {
 	const store = loadAuthStore();
 	return Object.keys(store.profiles);
-}
-
-export function getStorePath(): string {
-	return STORE_PATH;
 }
