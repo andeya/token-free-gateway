@@ -19,9 +19,9 @@ export interface AuthStore {
 
 const DEFAULT_STORE_PATH = join(homedir(), ".token-free-gateway", "auth-profiles.json");
 
-/** Returns the active store path. Override with TOKEN_FREE_GATEWAY_STORE_PATH (used in tests). */
+/** Returns the active store path. Override with TFG_STORE_PATH (used in tests). */
 export function getStorePath(): string {
-	return process.env.TOKEN_FREE_GATEWAY_STORE_PATH ?? DEFAULT_STORE_PATH;
+	return process.env.TFG_STORE_PATH ?? DEFAULT_STORE_PATH;
 }
 
 function ensureStoreDir(storePath: string): void {

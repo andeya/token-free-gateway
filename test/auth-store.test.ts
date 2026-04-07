@@ -12,11 +12,11 @@ import {
 const TEST_STORE_PATH = join(tmpdir(), `tfg-test-auth-${process.pid}.json`);
 
 beforeAll(() => {
-	process.env.TOKEN_FREE_GATEWAY_STORE_PATH = TEST_STORE_PATH;
+	process.env.TFG_STORE_PATH = TEST_STORE_PATH;
 });
 
 afterAll(() => {
-	delete process.env.TOKEN_FREE_GATEWAY_STORE_PATH;
+	delete process.env.TFG_STORE_PATH;
 	if (existsSync(TEST_STORE_PATH)) rmSync(TEST_STORE_PATH);
 });
 
