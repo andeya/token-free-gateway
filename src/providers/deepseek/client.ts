@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import type { Page } from "playwright-core";
+import { BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { DeepSeekWebCredentials } from "./auth.ts";
 import { parseDeepSeekStream } from "./stream.ts";
@@ -53,14 +55,24 @@ interface DeepSeekChatSessionResponse {
 	};
 }
 
+/** Result shape from `page.evaluate` wrappers (JSON body). */
+type DeepSeekBrowserEvalJsonResult =
+	| { ok: true; data: unknown }
+	| { ok: false; status: number; error: string };
+
+/** Result shape from `page.evaluate` when the success payload is a string (e.g. SSE text). */
+type DeepSeekBrowserEvalStringResult =
+	| { ok: true; data: string }
+	| { ok: false; status: number; error: string };
+
 export class DeepSeekWebClient implements WebProviderClient {
 	readonly providerId = "deepseek-web";
 	private cookie: string;
 	private bearer: string;
 	private userAgent: string;
-	private deviceId: string = "";
 	private chatSessionId = "";
 	private parentMessageId: string | number | null = null;
+	private page: Page | null = null;
 
 	constructor(auth: DeepSeekWebCredentials) {
 		this.cookie = auth.cookie || "";
@@ -70,9 +82,45 @@ export class DeepSeekWebClient implements WebProviderClient {
 			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 	}
 
-	private async fetchHeaders() {
+	private async ensurePage(): Promise<Page> {
+		if (this.page) {
+			try {
+				await this.page.evaluate(() => document.readyState);
+			} catch {
+				this.page = null;
+			}
+		}
+
+		if (this.page) {
+			return this.page;
+		}
+
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("deepseek.com", "https://chat.deepseek.com/");
+
+		const cookieStr = typeof this.cookie === "string" ? this.cookie.trim() : "";
+		if (cookieStr) {
+			const rawCookies = cookieStr.split(";").map((c) => {
+				const [name, ...valueParts] = c.trim().split("=");
+				return {
+					name: name?.trim() ?? "",
+					value: valueParts.join("=").trim(),
+					domain: ".deepseek.com",
+					path: "/",
+				};
+			});
+			const cookies = rawCookies.filter((c) => c.name.length > 0);
+			if (cookies.length > 0) {
+				await bm.addCookies(cookies);
+			}
+		}
+
+		return this.page;
+	}
+
+	/** Headers for browser-side fetch (no Cookie — browser jar handles it via credentials: "include"). */
+	private browserHeaders(): Record<string, string> {
 		return {
-			Cookie: this.cookie,
 			"User-Agent": this.userAgent,
 			"Content-Type": "application/json",
 			Accept: "*/*",
@@ -87,25 +135,16 @@ export class DeepSeekWebClient implements WebProviderClient {
 		};
 	}
 
+	/** Headers for server-side fetch (includes Cookie for uploadFile). */
+	private serverHeaders(): Record<string, string> {
+		return {
+			...this.browserHeaders(),
+			Cookie: this.cookie,
+		};
+	}
+
 	async init() {
-		// Get device ID from settings if not already present
-		if (!this.deviceId) {
-			try {
-				const res = await fetch(
-					"https://chat.deepseek.com/api/v0/client/settings?did=&scope=banner",
-					{
-						headers: await this.fetchHeaders(),
-					},
-				);
-				if (res.ok) {
-					// data is currently unused
-					// const data = await res.json();
-					// Extract did from headers or data if available
-				}
-			} catch (error) {
-				console.warn("[DeepSeekWebClient] Failed to fetch settings:", error);
-			}
-		}
+		await this.ensurePage();
 		if (!this.chatSessionId) {
 			const session = await this.createChatSession();
 			this.chatSessionId = session.chat_session_id || "";
@@ -152,28 +191,53 @@ export class DeepSeekWebClient implements WebProviderClient {
 
 	async createPowChallenge(targetPath: string): Promise<DeepSeekPowChallenge> {
 		console.log(`[DeepSeekWebClient] Creating PoW challenge for ${targetPath}...`);
-		const res = await fetch("https://chat.deepseek.com/api/v0/chat/create_pow_challenge", {
-			method: "POST",
-			headers: await this.fetchHeaders(),
-			body: JSON.stringify({
-				target_path: targetPath,
-			}),
-		});
+		const page = await this.ensurePage();
+		const headers = this.browserHeaders();
+		const evalResult = (await page.evaluate(
+			async ({
+				targetPath: tp,
+				headerRecord,
+			}: {
+				targetPath: string;
+				headerRecord: Record<string, string>;
+			}) => {
+				const res = await fetch("https://chat.deepseek.com/api/v0/chat/create_pow_challenge", {
+					method: "POST",
+					credentials: "include",
+					headers: {
+						...headerRecord,
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						target_path: tp,
+					}),
+				});
+				if (!res.ok) {
+					const errorText = await res.text();
+					return { ok: false as const, status: res.status, error: errorText };
+				}
+				const data = await res.json();
+				return { ok: true as const, data };
+			},
+			{ targetPath, headerRecord: headers },
+		)) as DeepSeekBrowserEvalJsonResult;
 
-		if (!res.ok) {
-			const errorText = await res.text();
-			console.error(`[DeepSeekWebClient] Failed to create PoW challenge: ${res.status}`, errorText);
-			throw new Error(`Failed to create PoW challenge: ${res.status} ${errorText}`);
+		if (!evalResult.ok) {
+			console.error(
+				`[DeepSeekWebClient] Failed to create PoW challenge: ${evalResult.status}`,
+				evalResult.error,
+			);
+			throw new Error(`Failed to create PoW challenge: ${evalResult.status} ${evalResult.error}`);
 		}
 
-		const data = (await res.json()) as DeepSeekPowResponse;
+		const data = evalResult.data as DeepSeekPowResponse;
 		console.log(`[DeepSeekWebClient] PoW data full-log:`, JSON.stringify(data));
 
 		const challenge = data.data?.biz_data?.challenge || data.data?.challenge || data.challenge;
 		if (!challenge) {
 			console.error(
 				`[DeepSeekWebClient] Critical Error: PoW challenge missing in response! Keys present:`,
-				Object.keys(data),
+				Object.keys(data as object),
 			);
 			throw new Error(`PoW challenge missing in response`);
 		}
@@ -275,20 +339,38 @@ export class DeepSeekWebClient implements WebProviderClient {
 
 	async createChatSession(): Promise<DeepSeekChatSession> {
 		const targetPath = "/api/v0/chat_session/create";
-		// chat_session/create typically does NOT require PoW or it might fail with INVALID_TARGET_PATH
-		const res = await fetch(`https://chat.deepseek.com${targetPath}`, {
-			method: "POST",
-			headers: await this.fetchHeaders(),
-			body: JSON.stringify({}),
-		});
+		const page = await this.ensurePage();
+		const headers = this.browserHeaders();
+		const evalResult = (await page.evaluate(
+			async ({ path, headerRecord }: { path: string; headerRecord: Record<string, string> }) => {
+				const res = await fetch(`https://chat.deepseek.com${path}`, {
+					method: "POST",
+					credentials: "include",
+					headers: {
+						...headerRecord,
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({}),
+				});
+				if (!res.ok) {
+					const errorText = await res.text();
+					return { ok: false as const, status: res.status, error: errorText };
+				}
+				const data = await res.json();
+				return { ok: true as const, data };
+			},
+			{ path: targetPath, headerRecord: headers },
+		)) as DeepSeekBrowserEvalJsonResult;
 
-		if (!res.ok) {
-			const errorText = await res.text();
-			console.error(`[DeepSeekWebClient] Failed to create chat session: ${res.status}`, errorText);
-			throw new Error(`Failed to create chat session: ${res.status} ${errorText}`);
+		if (!evalResult.ok) {
+			console.error(
+				`[DeepSeekWebClient] Failed to create chat session: ${evalResult.status}`,
+				evalResult.error,
+			);
+			throw new Error(`Failed to create chat session: ${evalResult.status} ${evalResult.error}`);
 		}
 
-		const data = (await res.json()) as DeepSeekChatSessionResponse;
+		const data = evalResult.data as DeepSeekChatSessionResponse;
 		const sessionId = data.data?.biz_data?.id || data.data?.biz_data?.chat_session_id || "";
 		console.log(`[DeepSeekWebClient] Chat session created: ${sessionId}`);
 		return {
@@ -323,36 +405,94 @@ export class DeepSeekWebClient implements WebProviderClient {
 		console.log(
 			`[DeepSeekWebClient] Sending chat completion request (session: ${params.sessionId})...`,
 		);
-		const res = await fetch(`https://chat.deepseek.com${targetPath}`, {
-			method: "POST",
-			headers: {
-				...(await this.fetchHeaders()),
-				"x-ds-pow-response": powResponse,
-			},
-			body: JSON.stringify({
-				chat_session_id: params.sessionId,
-				parent_message_id: params.parentMessageId ?? null,
-				prompt: params.message,
-				ref_file_ids: params.fileIds || [],
-				thinking_enabled: !(
-					params.model === "deepseek-chat" && !params.model?.includes("reasoning")
-				), // Default to true unless specifically chat-only
-				search_enabled: params.searchEnabled ?? true,
-				preempt: params.preempt ?? false,
-			}),
-			signal: params.signal,
-		});
+		const page = await this.ensurePage();
+		const headerRecord = this.browserHeaders();
+		const requestBody = {
+			chat_session_id: params.sessionId,
+			parent_message_id: params.parentMessageId ?? null,
+			prompt: params.message,
+			ref_file_ids: params.fileIds || [],
+			thinking_enabled: !(params.model === "deepseek-chat" && !params.model?.includes("reasoning")), // Default to true unless specifically chat-only
+			search_enabled: params.searchEnabled ?? true,
+			preempt: params.preempt ?? false,
+		};
 
-		if (!res.ok) {
-			const errorText = await res.text();
-			console.error(`[DeepSeekWebClient] Chat completion request failed: ${res.status}`, errorText);
-			throw new Error(`Chat completion failed: ${res.status} ${errorText}`);
+		const evalPromise = page.evaluate(
+			async ({
+				path,
+				pow,
+				headers,
+				bodyJson,
+			}: {
+				path: string;
+				pow: string;
+				headers: Record<string, string>;
+				bodyJson: string;
+			}) => {
+				const res = await fetch(`https://chat.deepseek.com${path}`, {
+					method: "POST",
+					credentials: "include",
+					headers: {
+						...headers,
+						"Content-Type": "application/json",
+						"x-ds-pow-response": pow,
+					},
+					body: bodyJson,
+				});
+				if (!res.ok) {
+					const errorText = await res.text();
+					return { ok: false as const, status: res.status, error: errorText };
+				}
+				const reader = res.body?.getReader();
+				if (!reader) {
+					return { ok: false as const, status: 500, error: "No response body" };
+				}
+				const decoder = new TextDecoder();
+				let fullText = "";
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) {
+						break;
+					}
+					fullText += decoder.decode(value, { stream: true });
+				}
+				return { ok: true as const, data: fullText };
+			},
+			{
+				path: targetPath,
+				pow: powResponse,
+				headers: headerRecord,
+				bodyJson: JSON.stringify(requestBody),
+			},
+		);
+
+		const result = (await (params.signal
+			? Promise.race([
+					evalPromise,
+					new Promise<never>((_, reject) => {
+						params.signal!.addEventListener("abort", () => {
+							reject(new Error("DeepSeek chat completion aborted"));
+						});
+					}),
+				])
+			: evalPromise)) as DeepSeekBrowserEvalStringResult;
+
+		if (!result.ok) {
+			console.error(
+				`[DeepSeekWebClient] Chat completion request failed: ${result.status}`,
+				result.error,
+			);
+			throw new Error(`Chat completion failed: ${result.status} ${result.error}`);
 		}
 
-		console.log(
-			`[DeepSeekWebClient] Chat completion response OK (status: ${res.status}). Content-Type: ${res.headers.get("content-type")}`,
-		);
-		return res.body;
+		console.log(`[DeepSeekWebClient] Chat completion response OK (stream read complete).`);
+		const encoder = new TextEncoder();
+		return new ReadableStream({
+			start(controller) {
+				controller.enqueue(encoder.encode(result.data));
+				controller.close();
+			},
+		});
 	}
 
 	async uploadFile(fileData: Buffer, fileName: string) {
@@ -377,7 +517,7 @@ export class DeepSeekWebClient implements WebProviderClient {
 		const res = await fetch(`https://chat.deepseek.com${targetPath}`, {
 			method: "POST",
 			headers: {
-				...(await this.fetchHeaders()),
+				...this.serverHeaders(),
 				"x-ds-pow-response": powResponse,
 				"x-file-size": fileData.length.toString(),
 			},
@@ -402,7 +542,7 @@ export class DeepSeekWebClient implements WebProviderClient {
 			const pollRes = await fetch(
 				`https://chat.deepseek.com/api/v0/file/fetch_files?file_ids=${fileId}`,
 				{
-					headers: await this.fetchHeaders(),
+					headers: this.serverHeaders(),
 				},
 			);
 			if (pollRes.ok) {
@@ -422,5 +562,9 @@ export class DeepSeekWebClient implements WebProviderClient {
 		}
 
 		return fileId;
+	}
+
+	async close(): Promise<void> {
+		this.page = null;
 	}
 }

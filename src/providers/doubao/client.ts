@@ -1,3 +1,5 @@
+import type { Page } from "playwright-core";
+import { type BrowserCookie, BrowserManager } from "../../browser/manager.ts";
 import type { ModelInfo, StreamResult, WebProviderClient } from "../types.ts";
 import type { DoubaoWebAuth } from "./auth.ts";
 import { parseDoubaoStream } from "./stream.ts";
@@ -34,6 +36,7 @@ export class DoubaoWebClient implements WebProviderClient {
 	readonly providerId = "doubao-web";
 	private auth: DoubaoWebAuth;
 	private config: DoubaoWebClientConfig;
+	private page: Page | null = null;
 
 	constructor(auth: DoubaoWebAuth | string, config: DoubaoWebClientConfig = {}) {
 		if (typeof auth === "string") {
@@ -80,34 +83,44 @@ export class DoubaoWebClient implements WebProviderClient {
 		};
 	}
 
-	private getHeaders(): Record<string, string> {
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-			Accept: "text/event-stream",
-			"User-Agent":
-				this.auth.userAgent ||
-				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-			Referer: "https://www.doubao.com/chat/",
-			Origin: "https://www.doubao.com",
-			"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-			"Accept-Encoding": "gzip, deflate, br",
-			Connection: "keep-alive",
-			"Sec-Fetch-Dest": "empty",
-			"Sec-Fetch-Mode": "cors",
-			"Sec-Fetch-Site": "same-origin",
-			"Agw-js-conv": "str",
-		};
+	private async ensurePage(): Promise<Page> {
+		if (this.page) {
+			try {
+				await this.page.evaluate(() => document.readyState);
+				return this.page;
+			} catch {
+				this.page = null;
+			}
+		}
+		const bm = BrowserManager.getInstance();
+		this.page = await bm.getPage("doubao.com", "https://www.doubao.com/chat/");
 
-		const sessionId = this.auth.sessionid;
 		const cookieHeader = this.auth.cookie;
-		if (cookieHeader) {
-			headers.Cookie = cookieHeader;
+		if (cookieHeader?.trim() && !cookieHeader.startsWith("{")) {
+			const cookies = cookieHeader
+				.split(";")
+				.map((c) => {
+					const [name, ...valueParts] = c.trim().split("=");
+					return {
+						name: name?.trim() ?? "",
+						value: valueParts.join("=").trim(),
+						domain: ".doubao.com",
+						path: "/",
+					};
+				})
+				.filter((c) => c.name.length > 0);
+			await bm.addCookies(cookies);
 		} else {
+			const sessionId = this.auth.sessionid;
 			const ttwid = this.auth.ttwid ? decodeURIComponent(this.auth.ttwid) : undefined;
-			headers.Cookie = ttwid ? `sessionid=${sessionId}; ttwid=${ttwid}` : `sessionid=${sessionId}`;
+			const toAdd: BrowserCookie[] = [
+				{ name: "sessionid", value: sessionId, domain: ".doubao.com", path: "/" },
+			];
+			if (ttwid) toAdd.push({ name: "ttwid", value: ttwid, domain: ".doubao.com", path: "/" });
+			await bm.addCookies(toAdd);
 		}
 
-		return headers;
+		return this.page;
 	}
 
 	private buildQueryParams(): string {
@@ -133,8 +146,24 @@ export class DoubaoWebClient implements WebProviderClient {
 
 	async init(): Promise<void> {
 		try {
-			const url = `${DOUBAO_API_BASE}/im/conversation/info?${this.buildQueryParams()}`;
-			await fetch(url, { method: "GET", headers: this.getHeaders() });
+			const page = await this.ensurePage();
+			const queryParams = this.buildQueryParams();
+			const probeUrl = `${DOUBAO_API_BASE}/im/conversation/info?${queryParams}`;
+			await page.evaluate(
+				async ({ url }: { url: string }) => {
+					await fetch(url, {
+						method: "GET",
+						headers: {
+							Accept: "application/json",
+							Referer: "https://www.doubao.com/chat/",
+							Origin: "https://www.doubao.com",
+							"Agw-js-conv": "str",
+						},
+						credentials: "include",
+					});
+				},
+				{ url: probeUrl },
+			);
 		} catch {
 			// session probe is best-effort
 		}
@@ -145,6 +174,7 @@ export class DoubaoWebClient implements WebProviderClient {
 		model?: string;
 		signal?: AbortSignal;
 	}): Promise<ReadableStream<Uint8Array>> {
+		const page = await this.ensurePage();
 		const queryParams = this.buildQueryParams();
 		const url = `${DOUBAO_API_BASE}/samantha/chat/completion?${queryParams}`;
 		const text = this.mergeMessagesForSamantha([{ role: "user", content: params.message }]);
@@ -172,19 +202,60 @@ export class DoubaoWebClient implements WebProviderClient {
 			local_message_id: crypto.randomUUID(),
 		});
 
-		const res = await fetch(url, {
-			method: "POST",
-			headers: this.getHeaders(),
-			body,
-			signal: params.signal,
-		});
+		const responseData = (await page.evaluate(
+			async ({ postUrl, bodyJson }: { postUrl: string; bodyJson: string }) => {
+				const res = await fetch(postUrl, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Accept: "text/event-stream",
+						Referer: "https://www.doubao.com/chat/",
+						Origin: "https://www.doubao.com",
+						"Agw-js-conv": "str",
+					},
+					body: bodyJson,
+					credentials: "include",
+				});
 
-		if (!res.ok) {
-			const errText = await res.text().catch(() => "");
-			throw new Error(`Doubao API error: ${res.status} ${errText}`);
+				if (!res.ok) {
+					const errText = await res.text().catch(() => "");
+					return {
+						ok: false as const,
+						status: res.status,
+						error: `Doubao API error: ${res.status} ${errText.slice(0, 500)}`,
+					};
+				}
+
+				const reader = res.body?.getReader();
+				if (!reader) {
+					return { ok: false as const, status: 500, error: "No response body from Doubao API" };
+				}
+
+				const decoder = new TextDecoder();
+				let fullText = "";
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					fullText += decoder.decode(value, { stream: true });
+				}
+
+				return { ok: true as const, data: fullText };
+			},
+			{ postUrl: url, bodyJson: body },
+		)) as { ok: true; data: string } | { ok: false; status: number; error: string };
+
+		if (!responseData.ok) {
+			throw new Error(responseData.error);
 		}
-		if (!res.body) throw new Error("No response body from Doubao API");
-		return res.body;
+
+		const encoder = new TextEncoder();
+		const data = responseData.data ?? "";
+		return new ReadableStream({
+			start(controller) {
+				controller.enqueue(encoder.encode(data));
+				controller.close();
+			},
+		});
 	}
 
 	async parseStream(
@@ -199,5 +270,9 @@ export class DoubaoWebClient implements WebProviderClient {
 			{ id: "doubao-seed-2.0", name: "Doubao Seed 2.0 (Web)" },
 			{ id: "doubao-pro", name: "Doubao Pro (Web)" },
 		];
+	}
+
+	async close(): Promise<void> {
+		this.page = null;
 	}
 }
