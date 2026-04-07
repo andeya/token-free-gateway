@@ -1,4 +1,6 @@
+import { evictProviderClient } from "../providers/registry.ts";
 import type { WebProviderClient } from "../providers/types.ts";
+import { ProviderApiError, SessionExpiredError } from "../providers/types.ts";
 import { buildPromptFromMessages, parseToolResponse } from "../tool-calling/converter.ts";
 import { makeChunk, sseDone, sseEvent, sseHeaders } from "./sse.ts";
 import type {
@@ -7,6 +9,12 @@ import type {
 	ToolCallDelta,
 	ToolCallOutput,
 } from "./types.ts";
+
+let _routeTimeoutMs = 300_000;
+
+export function setRouteTimeoutSec(sec: number): void {
+	_routeTimeoutMs = sec * 1000;
+}
 
 function generateId(): string {
 	return `chatcmpl-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
@@ -36,10 +44,18 @@ export async function handleChatCompletions(
 		return jsonError("Could not construct prompt from messages", 400);
 	}
 
-	if (body.stream) {
-		return handleStreaming(id, model, prompt, hasTools, body, client);
-	}
-	return handleNonStreaming(id, model, prompt, hasTools, body, client);
+	const handler = body.stream
+		? handleStreaming(id, model, prompt, hasTools, body, client)
+		: handleNonStreaming(id, model, prompt, hasTools, body, client);
+
+	const timeout = new Promise<Response>((resolve) =>
+		setTimeout(() => {
+			console.error(`[chat-completions] Request timed out after ${_routeTimeoutMs / 1000}s`);
+			resolve(jsonError("Gateway timeout: upstream provider did not respond in time", 504));
+		}, _routeTimeoutMs),
+	);
+
+	return Promise.race([handler, timeout]);
 }
 
 async function handleNonStreaming(
@@ -87,9 +103,7 @@ async function handleNonStreaming(
 
 		return Response.json(response);
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		console.error(`[chat-completions] Error: ${message}`);
-		return jsonError(message, 502);
+		return providerErrorResponse(err, "non-streaming");
 	}
 }
 
@@ -148,23 +162,33 @@ async function handleStreaming(
 	body: ChatCompletionRequest,
 	client: WebProviderClient,
 ): Promise<Response> {
+	// Await sendMessage BEFORE creating the SSE stream so that pre-stream
+	// errors (auth, rate-limit, model-not-available) return a proper HTTP
+	// error status instead of being buried inside an SSE event that the
+	// client cannot parse as a ChatCompletionChunk.
+	let providerStream: ReadableStream<Uint8Array>;
+	try {
+		providerStream = await client.sendMessage({ message: prompt, model });
+	} catch (err) {
+		return providerErrorResponse(err, "streaming (pre-stream)");
+	}
+
 	const readable = new ReadableStream({
 		async start(controller) {
 			const w = createSseWriter(controller);
 			try {
-				const claudeStream = await client.sendMessage({ message: prompt, model });
 				w.writeChunk(id, model, [{ index: 0, delta: { role: "assistant" }, finish_reason: null }]);
 
 				if (!hasTools) {
-					await streamWithoutTools(w, id, model, claudeStream, client);
+					await streamWithoutTools(w, id, model, providerStream, client);
 				} else {
-					await streamWithTools(w, id, model, claudeStream, body, client);
+					await streamWithTools(w, id, model, providerStream, body, client);
 				}
 
 				w.done();
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
-				console.error(`[chat-completions] Stream error: ${message}`);
+				console.error(`[chat-completions] Stream error (mid-stream): ${message}`);
 				w.error(message);
 				w.done();
 			}
@@ -212,4 +236,26 @@ async function streamWithTools(
 
 function jsonError(message: string, status: number): Response {
 	return Response.json({ error: { message, type: "invalid_request_error" } }, { status });
+}
+
+/**
+ * Map a caught provider error to an HTTP Response.
+ * - SessionExpiredError → 401, evict cached client
+ * - ProviderApiError    → mirror the provider's 4xx (don't wrap in 502)
+ * - anything else       → 502
+ */
+function providerErrorResponse(err: unknown, context: string): Response {
+	if (err instanceof SessionExpiredError) {
+		evictProviderClient(err.providerId);
+		console.error(`[chat-completions] ${context}: session expired for "${err.providerId}". Run 'token-free-gateway webauth'.`);
+		return jsonError(err.message, 401);
+	}
+	if (err instanceof ProviderApiError) {
+		const message = err.message;
+		console.error(`[chat-completions] ${context}: provider error ${err.httpStatus}: ${message}`);
+		return jsonError(message, err.httpStatus);
+	}
+	const message = err instanceof Error ? err.message : String(err);
+	console.error(`[chat-completions] ${context}: ${message}`);
+	return jsonError(message, 502);
 }

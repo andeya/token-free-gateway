@@ -63,6 +63,20 @@ async function loadDefinitions(): Promise<ProviderDefinition[]> {
 const clientCache = new Map<string, WebProviderClient>();
 
 /**
+ * Evict a cached provider client so the next `getProviderClient` call
+ * re-reads credentials from disk and creates a fresh instance.
+ * Called automatically when a SessionExpiredError is thrown.
+ */
+export function evictProviderClient(providerId: string): void {
+	const old = clientCache.get(providerId);
+	if (old) {
+		old.close?.().catch(() => {});
+		clientCache.delete(providerId);
+		console.log(`[registry] Evicted cached client for "${providerId}"`);
+	}
+}
+
+/**
  * Get or create a provider client for the given provider ID.
  * Returns null if no credentials are stored for this provider.
  */
@@ -141,4 +155,40 @@ export function clearProviderCache(providerId: string): void {
 	const client = clientCache.get(providerId);
 	if (client?.close) client.close();
 	clientCache.delete(providerId);
+}
+
+const SESSION_CHECK_TIMEOUT_MS = 10_000;
+
+/**
+ * Check session status for all cached provider clients that support it.
+ * Each check is guarded by a 10 s timeout so /health never hangs.
+ */
+export async function checkAllSessions(): Promise<
+	Record<string, { valid: boolean; reason?: string }>
+> {
+	const results: Record<string, { valid: boolean; reason?: string }> = {};
+	const entries = [...clientCache.entries()];
+	await Promise.all(
+		entries.map(async ([id, client]) => {
+			if (!client.checkSession) {
+				results[id] = { valid: true, reason: "unchecked" };
+				return;
+			}
+			try {
+				const race = Promise.race([
+					client.checkSession(),
+					new Promise<{ valid: false; reason: string }>((resolve) =>
+						setTimeout(
+							() => resolve({ valid: false, reason: "session check timed out" }),
+							SESSION_CHECK_TIMEOUT_MS,
+						),
+					),
+				]);
+				results[id] = await race;
+			} catch (err) {
+				results[id] = { valid: false, reason: err instanceof Error ? err.message : String(err) };
+			}
+		}),
+	);
+	return results;
 }
