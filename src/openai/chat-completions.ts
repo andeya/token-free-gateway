@@ -17,16 +17,9 @@ function estimateTokens(text: string): number {
 }
 
 export async function handleChatCompletions(
-	req: Request,
+	body: ChatCompletionRequest,
 	client: WebProviderClient,
 ): Promise<Response> {
-	let body: ChatCompletionRequest;
-	try {
-		body = (await req.json()) as ChatCompletionRequest;
-	} catch {
-		return jsonError("Invalid JSON body", 400);
-	}
-
 	if (!body.messages || body.messages.length === 0) {
 		return jsonError("messages is required and must not be empty", 400);
 	}
@@ -103,7 +96,6 @@ async function handleNonStreaming(
 // ---- Streaming helpers ----
 
 type SseWriter = {
-	write(data: string): void;
 	writeChunk(id: string, model: string, choices: Parameters<typeof makeChunk>[2]): void;
 	done(): void;
 	error(message: string): void;
@@ -112,20 +104,16 @@ type SseWriter = {
 
 function createSseWriter(controller: ReadableStreamDefaultController<Uint8Array>): SseWriter {
 	const encoder = new TextEncoder();
+	const emit = (data: string) => controller.enqueue(encoder.encode(data));
 	return {
-		write(data: string) {
-			controller.enqueue(encoder.encode(data));
-		},
 		writeChunk(id, model, choices) {
-			const chunk = makeChunk(id, model, choices);
-			controller.enqueue(encoder.encode(sseEvent(JSON.stringify(chunk))));
+			emit(sseEvent(JSON.stringify(makeChunk(id, model, choices))));
 		},
 		done() {
-			controller.enqueue(encoder.encode(sseDone()));
+			emit(sseDone());
 		},
 		error(message: string) {
-			const event = sseEvent(JSON.stringify({ error: { message, type: "server_error" } }));
-			controller.enqueue(encoder.encode(event));
+			emit(sseEvent(JSON.stringify({ error: { message, type: "server_error" } })));
 		},
 		close() {
 			controller.close();
